@@ -6,13 +6,13 @@
  * entire daemon. The service manages crashes.
 -->
 <tp:spec xmlns:tp="http://telepathy.freedesktop.org/wiki/DbusSpec#extensions-v0">
-    <tp:title>Problems API Specification</tp:title>
-    <tp:version>0.1</tp:version>
+    <tp:title>Problems API v2 Specification</tp:title>
+    <tp:version>0.2</tp:version>
     <tp:copyright>
-      Copyright (C) 2012 Red Hat
+      Copyright (C) 2012, 2015 Red Hat
     </tp:copyright>
     <tp:copyright>
-      Copyright (C) 2012 ABRT Team &lt;crash-catcher@lists.fedorahosted.org&gt;
+      Copyright (C) 2012, 2015 ABRT Team &lt;crash-catcher@lists.fedorahosted.org&gt;
     </tp:copyright>
 
     <!--
@@ -21,16 +21,17 @@
      *
     -->
 
-    <node name="/org/freedesktop/Problems">
-        <interface name="org.freedesktop.Problems">
+    <node name='/org/freedesktop/Problems2'>
+
+        <interface name='org.freedesktop.Problems2'>
             <tp:docstring>The Problems Service manages all the crashes.</tp:docstring>
 
-            <method name='NewProblem'>"
+            <method name='NewProblem'>
                 <tp:docstring>Creates a new problem and returns it's identifier.</tp:docstring>
 
-                <arg type='a{ss}' name='problem_data' direction='in'>
+                <arg type='a{sv}' name='problem_data' direction='in'>
                     <tp:docstring>
-                        A dictionary describing problem. There are few commonly recognized fields but the dictionary can hold anything you need.
+                        A dictionary describing problem where values are either file descriptors or strings. There are few commonly recognized fields but the dictionary can hold anything you need.
                         <variablelist>
                             <varlistentry>
                                 <term>analyzer</term>
@@ -89,6 +90,8 @@
                     <tp:docstring>An indentifier of the new problem</tp:docstring>
                 </arg>
 
+                <!-- TODO fix these examples -->
+
                 <tp:docstring>
                     <example id="NewProblem_example_python">
                         <title>How to create a new problems in Python</title>
@@ -128,10 +131,11 @@ dbus-send --system --type=method_call --print-reply \
                 </tp:docstring>
             </method>
 
+
             <method name='GetProblems'>
                 <tp:docstring>Gets a list of problem identifiers for problems visible by the caller.</tp:docstring>
 
-                <arg type='as' name='response' direction='out'>
+                <arg type='ao' name='response' direction='out'>
                     <tp:docstring>List of problem identifiers</tp:docstring>
                 </arg>
 
@@ -157,31 +161,135 @@ prblms = problems.GetProblems()
 
             </method>
 
-            <method name='GetForeignProblems'>
-                <tp:docstring>Gets a list of problem identifiers for problems not directly accessible by the caller.</tp:docstring>
+            <method name='GetProblemData'>
+                <tp:docstring>Gets an equivalent of libreport's ProblemData for the given problem entry.</tp:docstring>
 
-                <arg type='as' name='response' direction='out'>
-                    <tp:docstring>List of problem identifiers</tp:docstring>
+                <arg type='o' name='problem_object' direction='in'>
+                    <tp:docstring>Problem Entry path used to get the problem data.</tp:docstring>
                 </arg>
 
-            </method>
-
-
-
-            <method name='GetAllProblems'>
-                <tp:docstring>Gets a list of problems visible by the caller.</tp:docstring>
-
-                <arg type='as' name='response' direction='out'>
-                    <tp:docstring>List of problem identifiers</tp:docstring>
+                <arg type='a{sits}' name='problem_data' direction='out'>
+                    <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members. The first one is libreport's flags (problem_data.h), the second one is element size in Bytes and the last one is element's contents (data for CD_FLAG_TXT, file path for CD_FLAG_BIN and CD_FLAG_BIGTXT)</tp:docstring>
                 </arg>
             </method>
+            <method name='DeleteProblems'>
+                <tp:docstring>Deletes specified problems. The problems are specified as array of problem objects.</tp:docstring>
 
-            <method name='GetInfo'>
-                <tp:docstring>Gets a value of problem's element.</tp:docstring>
-
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>Identifier of problem from which we want to get info.</tp:docstring>
+                <arg type='ao' name='problem_objects' direction='in'>
+                    <tp:docstring>An array of problem objecsts to deleted.</tp:docstring>
                 </arg>
+            </method>
+
+            <signal name='Crash'>
+                <tp:docstring>A new system problem has been detected.</tp:docstring>
+
+                <arg type='o' name='problem_object' direction='out'>
+                    <tp:docstring>An identifier of the newly created problem.</tp:docstring>
+                </arg>
+
+                <arg type='s' name='uid' direction='out'>
+                    <tp:docstring>UID of user who reported this problem.</tp:docstring>
+                </arg>
+            </signal>
+
+        </interface>
+
+    </node>
+
+    <!--
+     * ======================================================================================
+     * Problems Entry Interface
+     *
+    -->
+
+    <node name='/org/freedesktop/Problems2/xxx'>
+
+        <interface name='org.freedesktop.Problems2.Entry'>
+            <tp:docstring>The Entry represents single problem.</tp:docstring>
+
+            <property name='id' type='s' access='read'>
+                <tp:docstring>The unix time when the collection was created.</tp:docstring>
+            </property>
+
+            <property name='uid' type='u' access='read'>
+                <tp:docstring>The uid of the crashed program.</tp:docstring>
+            </property>
+
+            <property name='username' type='s' access='read'>
+                <tp:docstring>The user name associated with the uid.</tp:docstring>
+            </property>
+
+            <property name='type' type='s' access='read'>
+                <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby).</tp:docstring>
+            </property>
+
+            <property name='detected' type='t' access='read'>
+                <tp:docstring>The unix time when the problem entry was created.</tp:docstring>
+            </property>
+
+            <property name='last_occurrence' type='t' access='read'>
+                <tp:docstring>The unix time when the problem entry was seen for the last time.</tp:docstring>
+            </property>
+
+            <property name='count' type='u' access='read'>
+                <tp:docstring>The number of observed problem's occurrences.</tp:docstring>
+            </property>
+
+            <property name='executable' type='s' access='read'>
+                <tp:docstring>The file system path to crashed program.</tp:docstring>
+            </property>
+
+            <property name='command_line_arguments' type='s' access='read'>
+                <tp:docstring>The command line arguments used run the crashed program.</tp:docstring>
+            </property>
+
+            <property name='component' type='s' access='read'>
+                <tp:docstring>The component which the package belogns to.</tp:docstring>
+            </property>
+
+            <property name='package' type='a{sssss}' access='read'>
+                <tp:docstring>Full name, epoch, name, version, release of the package which the crashed program belongs to.</tp:docstring>
+            </property>
+
+            <property name='uuid' type='s' access='read'>
+                <tp:docstring>A local scope, unique identifier for similar problems to the problem.</tp:docstring>
+            </property>
+
+            <property name='duphash' type='s' access='read'>
+                <tp:docstring>A global scope, unique identifier for similar problems to the problem.</tp:docstring>
+            </property>
+
+            <!-- <property name='reports' type='a{sa{ss}}' access='read'> -->
+            <property name='reports' type='a{sss}' access='read'>
+                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
+            </property>
+
+            <property name='reason' type='s' access='read'>
+                <tp:docstring>A brief description of what caused the problem.</tp:docstring>
+            </property>
+
+            <property name='resolution' type='s' access='read'>
+                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+            </property>
+
+            <property name='desktop_file' type='s' access='read'>
+                <tp:docstring>Then name of system desktop file used to start the program.</tp:docstring>
+            </property>
+
+            <property name='elements' type='as' access='read'>
+                <tp:docstring>List of all elements the problem have.</tp:docstring>
+            </property>
+
+            <property name='is_reported' type='b' access='read'>
+                <tp:docstring>True if someone took the time to file a ticket in the bugctracking system of OS.</tp:docstring>
+            </property>
+
+            <property name='is_reportable' type='b' access='read'>
+                <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
+            </property>
+
+            <method name='GetTextElements'>
+                <tp:docstring>Gets a value of problem's element which are store as text files.</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>A list of names of required info.</tp:docstring>
@@ -225,134 +333,72 @@ for prblmid in problems.GetProblems():
 
             </method>
 
-            <method name='SetElement'>
-                <tp:docstring>Sets a value of problem's element.</tp:docstring>
+            <method name='OpenElements'>
+                <tp:docstring>Returns lisf of file descriptors to the requested problem elements.</tp:docstring>
 
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>An identifier of problem.</tp:docstring>
+                <arg type='as' name='elements' direction='in'>
+                    <tp:docstring>A set of problem element names to open for reading.</tp:docstring>
                 </arg>
 
-                <arg type='s' name='name' direction='in'>
-                    <tp:docstring>A name of set element.</tp:docstring>
+                <arg type='a{si}' name='value' direction='in'>
+                    <tp:docstring>The file descriptors.</tp:docstring>
                 </arg>
 
-                <arg type='s' name='value' direction='in'>
-                    <tp:docstring>A value of problem's element.</tp:docstring>
-                </arg>
             </method>
 
-            <method name='DeleteElement'>
+            <method name='SaveTextElements'>
+                <tp:docstring>Creates or updates text problem elements.</tp:docstring>
+
+                <arg type='a{ss}' name='name' direction='in'>
+                    <tp:docstring>The problem elements with their values.</tp:docstring>
+                </arg>
+
+            </method>
+
+            <method name='SaveElements'>
+                <tp:docstring>Creates or updates problem elements for file descriptors.</tp:docstring>
+
+                <arg type='a{si}' name='name' direction='in'>
+                    <tp:docstring>The problem elements with their file descriptors.</tp:docstring>
+                </arg>
+
+            </method>
+
+            <method name='DeleteElements'>
                 <tp:docstring>Deletes problem's element.</tp:docstring>
 
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>An identifier of problem.</tp:docstring>
+                <arg type='as' name='name' direction='in'>
+                    <tp:docstring>The list of deleted problem element.</tp:docstring>
                 </arg>
 
-                <arg type='s' name='name' direction='in'>
-                    <tp:docstring>A name of deleted element.</tp:docstring>
-                </arg>
             </method>
 
-            <method name='TestElementExists'>
-                <tp:docstring>Checks whether the element exists.</tp:docstring>
+        </interface>
 
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>An identifier of problem.</tp:docstring>
-                </arg>
+    </node>
 
-                <arg type='s' name='name' direction='in'>
-                    <tp:docstring>A name of checked element.</tp:docstring>
-                </arg>
+    <!--
+     * ======================================================================================
+     * Session Interface
+     *
+    -->
 
-                <arg type='b' name='response' direction='out'>
-                    <tp:docstring>True if the element exists; otherwise false.</tp:docstring>
-                </arg>
+    <node name='/org/freedesktop/Problems2/session/xxx'>
+
+        <interface name='org.freedesktop.Problems2.Session'>
+            <tp:docstring>The Session holds information about the client</tp:docstring>
+
+            <property name='is_authorized' type='b' access='read'>
+                <tp:docstring>TODO</tp:docstring>
+            </property>
+
+            <method name='Authorize'>
+                <tp:docstring>TODO</tp:docstring>
             </method>
 
-            <method name='GetProblemData'>"
-                <tp:docstring>Returns problem's data.</tp:docstring>
-
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>An identifier of problem.</tp:docstring>
-                </arg>
-
-                <arg type='a{sits}' name='problem_data' direction='out'>
-                    <tp:docstring>A dictionary where keys are element names and values are triplets (element libreport flags, element size, element contents).</tp:docstring>
-                </arg>
+            <method name='Close'>
+                <tp:docstring>TODO</tp:docstring>
             </method>
-
-            <method name='ChownProblemDir'>
-                <tp:docstring>Assures ownership of a specified problem for the caller.</tp:docstring>
-
-                <arg type='s' name='problem_dir' direction='in'>
-                    <tp:docstring>An indetifier of the problem.</tp:docstring>
-                </arg>
-            </method>
-
-            <method name='DeleteProblem'>
-                <tp:docstring>Deletes specified problems. The problems are specified as array of problem_dir.</tp:docstring>
-
-                <arg type='as' name='problem_dir' direction='in'>
-                    <tp:docstring>An identifier of problem to be deleted.</tp:docstring>
-                </arg>
-            </method>
-
-            <method name='FindProblemByElementInTimeRange'>
-                <tp:docstring>Finds an problem having an element's value and has been created in specified time range.</tp:docstring>
-
-                <arg type='s' name='element' direction='in'>
-                    <tp:docstring>A name of searched element.</tp:docstring>
-                </arg>
-
-                <arg type='s' name='value' direction='in'>
-                    <tp:docstring>A value of the searched element.</tp:docstring>
-                </arg>
-
-                <arg type='x' name='timestamp_from' direction='in'>
-                    <tp:docstring>Beginning of required time range.</tp:docstring>
-                </arg>
-
-                <arg type='x' name='timestamp_to' direction='in'>
-                    <tp:docstring>End of required time range.</tp:docstring>
-                </arg>
-
-                <arg type='b' name='all_users' direction='in'>
-                    <tp:docstring>Perform a look up in all system problems.</tp:docstring>
-                </arg>
-
-                <arg type='as' name='response' direction='out'>
-                    <tp:docstring>List of problem idnetifiers.</tp:docstring>
-                </arg>
-            </method>
-
-            <method name='Quit'>
-                <tp:docstring>Kills the service.</tp:docstring>
-            </method>
-
-            <signal name='Crash'>
-                <tp:docstring>A new system problem has been detected. This is the second variant of the Crash signal with additional argument <emphasis>uid</emphasis></tp:docstring>
-
-                <arg type='s' name='package' direction='out'>
-                    <tp:docstring>List of problem idnetifiers.</tp:docstring>
-                </arg>
-
-                <arg type='s' name='problem_id' direction='out'>
-                    <tp:docstring>An identifier of the newly created problem.</tp:docstring>
-                </arg>
-
-                <arg type='s' name='uid' direction='out'>
-                    <tp:docstring>UID of user who reported this problem.</tp:docstring>
-                </arg>
-
-                <arg type='s' name='uuid' direction='out'>
-                    <tp:docstring>UUID - a weak problem identifier usuful for local duplicates look up.</tp:docstring>
-                </arg>
-
-                <arg type='s' name='duphash' direction='out'>
-                    <tp:docstring>DUPHASH - a strong problem identifier usuful for global duplicates look up.</tp:docstring>
-                </arg>
-
-            </signal>
 
         </interface>
 
