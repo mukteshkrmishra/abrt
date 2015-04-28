@@ -90,6 +90,8 @@
                     <tp:docstring>An indentifier of the new problem</tp:docstring>
                 </arg>
 
+                <!-- TODO fix these examples -->
+
                 <tp:docstring>
                     <example id="NewProblem_example_python">
                         <title>How to create a new problems in Python</title>
@@ -129,19 +131,12 @@ dbus-send --system --type=method_call --print-reply \
                 </tp:docstring>
             </method>
 
-            <method name='GetSession'>
-                <tp:docstring>Returns a session object which implements the org.freedesktop.Problems2.Session interface.</tp:docstring>
-
-                <arg type='o' name='session' direction='out'>
-                    <tp:docstring>An object path</tp:docstring>
-                </arg>
-            </method>
 
             <method name='GetProblems'>
                 <tp:docstring>Returns a list of problem identifiers for problems visible by the caller. If the session is authorized (GetSession), then the method returns all detected problems (system problems and problems of other users).</tp:docstring>
 
                 <arg type='ao' name='response' direction='out'>
-                    <tp:docstring>List of problem objects paths</tp:docstring>
+                    <tp:docstring>List of problem identifiers</tp:docstring>
                 </arg>
 
                 <tp:docstring>
@@ -215,35 +210,14 @@ for path in prblms:
             </method>
 
             <method name='GetProblemData'>
-                <tp:docstring>Gets an equivalent of libreport's ProblemData for the given problem entry ($INCLUDE_DIR/libreport/problem_data.h).</tp:docstring>
+                <tp:docstring>Gets an equivalent of libreport's ProblemData for the given problem entry.</tp:docstring>
 
                 <arg type='o' name='problem_object' direction='in'>
                     <tp:docstring>Problem Entry path used to get the problem data.</tp:docstring>
                 </arg>
 
-                <arg type='a{s(its)}' name='problem_data' direction='out'>
-                    <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members:
-                    <orderedlist>
-                        <listitem><para>libreport flags ($INCLUDE_DIR/libreport/problem_data.h)</para></listitem>
-                        <listitem><para>real file size in Bytes</para></listitem>
-                        <listitem><para>a representation of the element depending on the libreport flags</para>
-                        <variablelist>
-                            <varlistentry>
-                                <term>CD_FLAG_TXT</term>
-                                <listitem><para>file contents</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>CD_FLAG_BIN</term>
-                                <listitem><para>file path</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>CD_FLAG_BIGTXT</term>
-                                <listitem><para>file path</para></listitem>
-                            </varlistentry>
-                        </variablelist>
-                        </listitem>
-                    </orderedlist>
-                    </tp:docstring>
+                <arg type='a{sits}' name='problem_data' direction='out'>
+                    <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members. The first one is libreport's flags (problem_data.h), the second one is element size in Bytes and the last one is element's contents (data for CD_FLAG_TXT, file path for CD_FLAG_BIN and CD_FLAG_BIGTXT)</tp:docstring>
                 </arg>
             </method>
             <method name='DeleteProblems'>
@@ -258,7 +232,7 @@ for path in prblms:
                 <tp:docstring>A new system problem has been detected.</tp:docstring>
 
                 <arg type='o' name='problem_object' direction='out'>
-                    <tp:docstring>An identifier of the detected problem.</tp:docstring>
+                    <tp:docstring>An identifier of the newly created problem.</tp:docstring>
                 </arg>
 
                 <arg type='s' name='uid' direction='out'>
@@ -289,19 +263,15 @@ for path in prblms:
                 <tp:docstring>The uid of the crashed program.</tp:docstring>
             </property>
 
-            <property name='user' type='s' access='read'>
+            <property name='username' type='s' access='read'>
                 <tp:docstring>The user name associated with the uid.</tp:docstring>
             </property>
 
-            <property name='hostname' type='s' access='read'>
-                <tp:docstring>Name of the host where the problem occurred</tp:docstring>
-            </property>
-
             <property name='type' type='s' access='read'>
-                <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby, ...).</tp:docstring>
+                <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby).</tp:docstring>
             </property>
 
-            <property name='first_occurrence' type='t' access='read'>
+            <property name='detected' type='t' access='read'>
                 <tp:docstring>The unix time when the problem entry was created.</tp:docstring>
             </property>
 
@@ -322,19 +292,11 @@ for path in prblms:
             </property>
 
             <property name='component' type='s' access='read'>
-                <tp:docstring>The component which the package belongs to.</tp:docstring>
+                <tp:docstring>The component which the package belogns to.</tp:docstring>
             </property>
 
-            <property name='package' type='(sssss)' access='read'>
-                <tp:docstring>Information about the package which the crashed program belongs to:
-                <orderedlist>
-                    <listitem><para>full name</para></listitem>
-                    <listitem><para>epoch</para></listitem>
-                    <listitem><para>name</para></listitem>
-                    <listitem><para>version</para></listitem>
-                    <listitem><para>release</para></listitem>
-                </orderedlist>
-                </tp:docstring>
+            <property name='package' type='a{sssss}' access='read'>
+                <tp:docstring>Full name, epoch, name, version, release of the package which the crashed program belongs to.</tp:docstring>
             </property>
 
             <property name='uuid' type='s' access='read'>
@@ -345,302 +307,37 @@ for path in prblms:
                 <tp:docstring>A global scope, unique identifier for similar problems to the problem.</tp:docstring>
             </property>
 
-<!--
-Property "reports":
-===================
-libreports 'repoted_to' contains known reports of a problem. Every report is
-stored in a form of a single line. Every 'reported_to' line is prefixed with
-"label" followed ":". We will use term 'title' instead of 'label.
-libreport recognizes three value types on lines of 'reported_to' element:
-1. text message
-2. URL (Bugzilla, e-mail, upload, RHSupport)
-3. BTHASH (uReport)
-
-One might presume the list will grow in the future with the growing number of
-report types and supported bug trackers. Hence the API should not have
-hard-coded types and should be able to easily start supporting new
-'reported_to' types. This goal is in D-Bus APIs achieved by using dictionaries
-with the value of the type Variant and a string key (a{sv}).
-
-Know keys:
-    * MSG - a text description of the report
-    * URL - an URL to the report
-    * BTHASH - a global uReport identifier
-
-The final type of the property 'reports' would be "a(sa{sv})".
-
-Example:
-
-file "reported_to":
-    Bugzilla: URL=https://bugzill.example.com/1000000
-    Bugzilla: URL=https://bugzill.example.com/1234567
-    email: URL=mailto://bugs@example-project.org
-    ABRT Server: BTHASH=DEADBEFF81680083
-    RHTSupport: URL=https://support.corp.com/ticket=12345 MSG=New customer case 12345
-
-property "reports":
-    [
-        ( "Bugzilla",
-            { "URL" : "https://bugzill.example.com/1000000" }
-        ),
-        ( "Bugzilla",
-            { "URL" : "https://bugzill.example.com/1234567" },
-        ),
-        ( "email",
-            { "URL" : "mailto://bugs@example-project.org" }
-        ),
-        ( "ABRT Server",
-            { "BTHASH" : "DEADBEFF81680083" },
-        ),
-        ( "RHTSupport",
-            { "URL" : "https://support.corp.com/ticket=12345",
-              "MSG" : "New customer case 12345" }
-        )
-    ]
-
-Note:
-
-We will not convert the format of reported_to to JSON and use it for storing
-solutions, because the solutions will have own element and the file reported_to
-is just a list of reports and should not be overloaded.
--->
-
-<!--
-We have to provide a way to edit the reports (add/remove/update) without
-the need to touch raw data.
-====
-SetSemanticElement() provides the way to modify 'reports' property.
--->
-            <property name='reports' type='a{sa{sv}}' access='read'>
-                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report information ("URL", "https://bugzilla.redhat.com/1000000"). Known information types are the following:
-                    <variablelist>
-                        <varlistentry>
-                            <term>URL</term>
-                            <listitem><para>An URL</para></listitem>
-                        </varlistentry>
-                        <varlistentry>
-                            <term>BTHASH</term>
-                            <listitem><para>An indentifier of the problem returned by ABRT server</para></listitem>
-                        </varlistentry>
-                        <varlistentry>
-                            <term>MSG</term>
-                            <listitem><para>A message</para></listitem>
-                        </varlistentry>
-                        <varlistentry>
-                            <term>CERTAINTY</term>
-                            <listitem><para>This type can appear only together with a entry of the "URL" type. Its value is an integer and represents perctual relevance to of the URL to the problem.</para></listitem>
-                        </varlistentry>
-                    </variablelist>
-                </tp:docstring>
+            <!-- <property name='reports' type='a{sa{ss}}' access='read'> -->
+            <property name='reports' type='a{sss}' access='read'>
+                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
             </property>
 
             <property name='reason' type='s' access='read'>
                 <tp:docstring>A brief description of what caused the problem.</tp:docstring>
             </property>
 
-<!--
-'not-reportable' element vs. FAF solutions
-``````````````````````````````````````````
-
-The former is created by ABRT tools, the latter is linked to micro-reports.
-
-The current FAF HTTP API returns a list of reports and a list of solutions in
-a response message to a received micro-report. The list of reports is stored in
-'reported_to' element and the list of solutions is joined into a single string
-and is stored in 'not-reportable' element.
-
-The current implementation prevents us from sending 'suggestions', because once
-'not-reportable' element is created, the problem is not reportable any more.
-
-There is a proposal for extending the FAF response format which will mitigate
-the problem described above:
-https://github.com/abrt/faf/wiki/Improved-solutions-protocol
-
-The new format introduces 'bugs' and 'solutions' keys in the response object
-and values of those objects are not easily transformable to ABRT already
-existing problem elements.
-
-FAF response bugs in 'reported_to' element:
-===========================================
-We can save value of 'bugs' key in 'reported_to' element but we
-have to introduce a new key "CERTAINTY" in the reported_to entry format.
-
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-| JSON key   | 'reported_to' entry key
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-| bugtracker | "stored as a prefix the entry and followed by ':'"
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-| title      | MSG
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-| url        | URL
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-| certainty  | CERTAINTY
-+ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-FAF response solutions:
-=======================
-Save values of solutions whose certainty value equals 100 in 'not-reportable'
-element. Use the current algorithm for building the final 'not-reportable' text
-value.
-
-'not-reportable' element cannot be obsolete because ABRT tools creates the
-element to mark the newly created problem as not reportable. The existence of
-the element is tested by ABRT Reporting Clients and if the element exists, the
-client terminates the reporting process (at the beginning and in the middle as
-well).
-
-Introduce a new problem element called 'solutions' and serialized the value of
-'solutions' object to the new problem element. The serialization format will be
-JSON.
-
-Adoption of FAF solutions in the D-Bus interface
-=================================================
-The chosen transformation schema requires one property for 'not-reportable'
-element and another property for 'solutions' element.
-
-The first draft of the API used to expose 'not-reportable' element in a
-property called 'resolution'. The name was chosen because the name
-'not-reportable' does not induce useful connotations (the name looks like a
-name for a boolean value instead of a description).
-
-Since we need to expose 'solution' elements and exposing the element as a new
-property called 'solution' sounds mos natural, we should consider renaming
-'resolution' property, because exposing both 'solutions' and 'resolution'
-properties might be confusing.
-
-Proposed names:
-* technical_description
-* technical_details
-
-We have chosen 'technical_details' because the suffix 'details' does not imply
-a paragraph of human readable text, so it could hold a structured text.
--->
-            <property name='solutions' type='a(sssssi)' access='read'>
-                <tp:docstring>List of solutions that are a structrure with these members (which are self-explanatory):
-                    <orderedlist>
-                        <listitem><para>solution type</para></listitem>
-                        <listitem><para>title</para></listitem>
-                        <listitem><para>URL</para></listitem>
-                        <listitem><para>note_text</para></listitem>
-                        <listitem><para>note_html</para></listitem>
-                        <listitem><para>certainty</para></listitem>
-                    </orderedlist>
-                </tp:docstring>
-            </property>
-
-            <property name='technical_details' type='s' access='read'>
-                <tp:docstring>Technical details about the problem usually containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+            <property name='resolution' type='s' access='read'>
+                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
 
             <property name='desktop_file' type='s' access='read'>
-                <tp:docstring>The name of system desktop file used to start the program. This property is set to some value only if the program was started as an application, the application was found and the program is shipped with a system package (i.e. this property is empty for crashes of user application).</tp:docstring>
+                <tp:docstring>Then name of system desktop file used to start the program.</tp:docstring>
             </property>
 
             <property name='elements' type='as' access='read'>
-                <tp:docstring>List of all elements the problem data contains.</tp:docstring>
-            </property>
-
-            <property name='semantic_elements' type='as' access='read'>
-                <tp:docstring>List of all semantic elements that can be handled by GetSemanticElement and SetSemanticElement methods.</tp:docstring>
+                <tp:docstring>List of all elements the problem have.</tp:docstring>
             </property>
 
             <property name='is_reported' type='b' access='read'>
-                <tp:docstring>True if someone took the time to file a ticket in the OS's default bug tracking system.</tp:docstring>
+                <tp:docstring>True if someone took the time to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
 
-            <property name='can_be_reported' type='b' access='read'>
-                <tp:docstring>TRUE if it is possible to file a ticket in the OS's default bug tracking system.</tp:docstring>
+            <property name='is_reportable' type='b' access='read'>
+                <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
 
-            <property name='is_remote' type='b' access='read'>
-                <tp:docstring>TRUE if the problem data has been uploaded by another host.</tp:docstring>
-            </property>
-<!--
-Generic property getter
-=======================
-
-It is expectable that we will need to add new properties. We can handle it by
-adding a new D-Bus property and force consumers to write their code ready for
-the missing properties or we can add a method returning variant or better a{sv}.
--->
-            <method name='GetSemanticElement'>
-                <tp:docstring>Gets semantic values of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements. It is an error to call this method with an element that is not listed in the property 'semantic_elements'</tp:docstring>
-
-                <arg type='as' name='element_names' direction='in'>
-                    <tp:docstring>Requested element names.</tp:docstring>
-                </arg>
-
-                <arg type='a{sv}' name='values' direction='out'>
-                    <tp:docstring>A dictionary where keys are element names and values depend on the implementation of 'org.freedesktop.Problems2'.</tp:docstring>
-                </arg>
-            </method>
-
-            <method name='SetSemanticElement'>
-                <tp:docstring>Sets semantic value of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements. It is an error to call this method with an element that is not listed in the property 'semantic_elements'</tp:docstring>
-
-                <arg type='a{sv}' name='values' direction='in'>
-                    <tp:docstring>A dictionary where keys are element names and values depend on the implementation of 'org.freedesktop.Problems2'.</tp:docstring>
-                </arg>
-            </method>
-<!--
-Getters and setters
-===================
-We need to decided whether we want have more, specialized functions or less,
-configurable functions. According to D-Bus API Design Guidelines, it is a good
-idea to use flag fields in method calls.
-
-There is a question that needs to be answered for both approaches:
-1. What should happen if the caller wants an element of not supported type?
-
-
-Use the type Variable in the getters:
-`````````````````````````````````````
-method GetTextElements(in as, out a{ss})
-    returns a list of values of text elements
-    1. return an error or treat it as missing
-
-and method OpenElements(in as, out a{su})
-    returns a list of file descriptors to both kind of elements
-    1. everything is a file descriptor, so the caller has to recognize the
-       type of the elements on his own
-
-OR:
-
-method ReadElements(in asi, out a{sv})
-    returns binary elements as UNIX file descriptors and text elements as strings
-    i == flags
-        * NO FLAGS -> open both binary and text elements
-        * ALL FD -> return everything as UNIX file descriptors
-        * ONLY TEXT -> get only text elements
-        * ONLY BINARY -> get only binary elements
-        ? ONLY BIG TEXT -> or treat this as BINARY?
-
-    1. client has to recognize the return type and behave appropriately
-     1.a (ONLY TEXT) return an error or treat it as missing
-     1.b (ONLY TEXT | ALL FD) the caller knows what to do
-     1.c (ONLY BINARY) the caller has to recognize the type of the elements on
-         his own
-     1.d (ONLY BINARY | ALL FD) the same as 1.c
-
-The method ReadElements is more error prone because clients need to write code
-checking the return type. But the method is more flexible because of the
-argument flags, so it would be better to use this variant.
-
-
-Use the type Variable in the setters:
-`````````````````````````````````````
-method SaveTextElements(in ass)
-method SaveElements(in asu)
-
-OR:
-
-method SaveElements(in asv)
-
-The Variable variant is definitely more convenient for users!
--->
-
-            <method name='ReadElements'>
-                <tp:docstring>Gets a raw value of a problem's element.</tp:docstring>
+            <method name='GetTextElements'>
+                <tp:docstring>Gets a value of problem's element which are store as text files.</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>A list of names of required info. If type of a requested element does not match the type specified in the argument 'i', the element will be ignored and its value will not be included in the response.</tp:docstring>
@@ -714,39 +411,42 @@ for prblmprx in problems.GetProblems():
 
             </method>
 
-            <method name='SaveElements'>
-                <tp:docstring>Creates or updates raw values of the given problem elements</tp:docstring>
+            <method name='OpenElements'>
+                <tp:docstring>Returns lisf of file descriptors to the requested problem elements.</tp:docstring>
 
-                <arg type='a{sv}' name='elements' direction='in'>
-                    <tp:docstring>The problem elements and their values of one of the fllowing types:
-                    <variablelist>
-                        <varlistentry>
-                            <term>s</term>
-                            <listitem><para>text data</para></listitem>
-                        </varlistentry>
-                        <varlistentry>
-                            <term>ay</term>
-                            <listitem><para>binary data</para></listitem>
-                        </varlistentry>
-                        <varlistentry>
-                            <term>h</term>
-                            <listitem><para>file descriptor</para></listitem>
-                        </varlistentry>
-                    </variablelist>
-                   </tp:docstring>
+                <arg type='as' name='elements' direction='in'>
+                    <tp:docstring>A set of problem element names to open for reading.</tp:docstring>
                 </arg>
 
-                <arg type='i' name='flags' direction='in'>
-                    <tp:docstring>This argument can be used in future to allow the caller to choose whether he want to append the elements or truncate them.</tp:docstring>
+                <arg type='a{si}' name='value' direction='in'>
+                    <tp:docstring>The file descriptors.</tp:docstring>
+                </arg>
+
+            </method>
+
+            <method name='SaveTextElements'>
+                <tp:docstring>Creates or updates text problem elements.</tp:docstring>
+
+                <arg type='a{ss}' name='name' direction='in'>
+                    <tp:docstring>The problem elements with their values.</tp:docstring>
+                </arg>
+
+            </method>
+
+            <method name='SaveElements'>
+                <tp:docstring>Creates or updates problem elements for file descriptors.</tp:docstring>
+
+                <arg type='a{si}' name='name' direction='in'>
+                    <tp:docstring>The problem elements with their file descriptors.</tp:docstring>
                 </arg>
 
             </method>
 
             <method name='DeleteElements'>
-                <tp:docstring>Deletes the listed problem's elements.</tp:docstring>
+                <tp:docstring>Deletes problem's element.</tp:docstring>
 
                 <arg type='as' name='name' direction='in'>
-                    <tp:docstring>The list of deleted problem elements.</tp:docstring>
+                    <tp:docstring>The list of deleted problem element.</tp:docstring>
                 </arg>
 
             </method>
@@ -764,73 +464,20 @@ for prblmprx in problems.GetProblems():
     <node name='/org/freedesktop/Problems2/session/xxx'>
 
         <interface name='org.freedesktop.Problems2.Session'>
-            <tp:docstring>Session objects hold information about identity of clients. A session object is created automatically when a new client makes connection. Clients are treated as an anonymous users until they are authorized in 'Authorize' method.</tp:docstring>
+            <tp:docstring>The Session holds information about the client</tp:docstring>
 
             <property name='is_authorized' type='b' access='read'>
-                <tp:docstring>TRUE if the client is authorized; otherwise FALSE.</tp:docstring>
+                <tp:docstring>TODO</tp:docstring>
             </property>
 
             <method name='Authorize'>
-                <tp:docstring></tp:docstring>
-
-                <arg type='x' name='timestamp_from' direction='in'>
-                    <tp:docstring>Beginning of required time range.</tp:docstring>
-                </arg>
-
-                <arg type='b' name='synchronous' direction='in'>
-                    <tp:docstring>If FALSE, the method returns immediately after an authorization request is accepted; otherwise the method blocks until the authorization request is finished.</tp:docstring>
-                </arg>
-
-                <arg type='i' name='result' direction='out'>
-                    <tp:docstring>
-                        <variablelist>
-                            <varlistentry>
-                                <term>-1</term>
-                                <listitem><para>An error occurred</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>0</term>
-                                <listitem><para>The authorization request has succeeded and the client is now authorized.</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>1</term>
-                                <listitem><para>The authorization request has been accepted (only if the synchronous argument was TRUE).</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>2</term>
-                                <listitem><para>The previous authorization request is not finished yet (only if the synchronous argument was TRUE).</para></listitem>
-                            </varlistentry>
-                        </variablelist>
-                    </tp:docstring>
-                </arg>
+                <tp:docstring>TODO</tp:docstring>
             </method>
 
             <method name='Close'>
-                <tp:docstring>Disposes the current session object and drops all authorization tokens. If the client makes a further action, a new session object on the same path will be created.</tp:docstring>
+                <tp:docstring>TODO</tp:docstring>
             </method>
 
-            <signal name='AuthorizationChanged'>
-                <tp:docstring>Notifies the changes of state of authorization.</tp:docstring>
-
-                <arg type='i' name='status' direction='out'>
-                    <tp:docstring>Describes the change that happened and can be one of the following values:
-                        <variablelist>
-                            <varlistentry>
-                                <term>-1</term>
-                                <listitem><para>The recent authorization request has failed.</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>0</term>
-                                <listitem><para>The recent authorization request has succeeded and the client is now authorized.</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>1</term>
-                                <listitem><para>Authorization has been lost.</para></listitem>
-                            </varlistentry>
-                        </variablelist>
-                    </tp:docstring>
-                </arg>
-            </signal>
         </interface>
 
     </node>
