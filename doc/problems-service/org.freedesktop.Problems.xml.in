@@ -321,7 +321,7 @@ for path in prblms:
             </property>
 
             <property name='desktop_file' type='s' access='read'>
-                <tp:docstring>Then name of system desktop file used to start the program.</tp:docstring>
+                <tp:docstring>The name of system desktop file used to start the program. This property is set to some value only if the program was started as an application, the application was found and the program is shipped with a system package (i.e. this property is empty for crashes of user application).</tp:docstring>
             </property>
 
             <property name='elements' type='as' access='read'>
