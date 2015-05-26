@@ -307,7 +307,66 @@ for path in prblms:
                 <tp:docstring>A global scope, unique identifier for similar problems to the problem.</tp:docstring>
             </property>
 
-            <!-- <property name='reports' type='a{sa{ss}}' access='read'> -->
+<!--
+Property "reports":
+===================
+libreports 'repoted_to' contains known reports of a problem. Every report is
+stored in a form of a single line. Every 'reported_to' line is prefixed with
+"label" followed ":". We will use term 'title' instead of 'label.
+libreport recognizes three value types on lines of 'reported_to' element:
+1. text message
+2. URL (Bugzilla, e-mail, upload, RHSupport)
+3. BTHASH (uReport)
+
+One might presume the list will grow in the future with the growing number of
+report types and supported bug trackers. Hence the API should not have
+hard-coded types and should be able to easily start supporting new
+'reported_to' types. This goal is in D-Bus APIs achieved by using dictionaries
+with the value of the type Variant and a string key (a{sv}).
+
+Know keys:
+    * MSG - a text description of the report
+    * URL - an URL to the report
+    * BTHASH - a global uReport identifier
+
+The final type of the property 'reports' would be "a(sa{sv})".
+
+Example:
+
+file "reported_to":
+    Bugzilla: URL=https://bugzill.example.com/1000000
+    Bugzilla: URL=https://bugzill.example.com/1234567
+    email: URL=mailto://bugs@example-project.org
+    ABRT Server: BTHASH=DEADBEFF81680083
+    RHTSupport: URL=https://support.corp.com/ticket=12345 MSG=New customer case 12345
+
+property "reports":
+    [
+        ( "Bugzilla",
+            { "URL" : "https://bugzill.example.com/1000000" }
+        ),
+        ( "Bugzilla",
+            { "URL" : "https://bugzill.example.com/1234567" },
+        ),
+        ( "email",
+            { "URL" : "mailto://bugs@example-project.org" }
+        ),
+        ( "ABRT Server",
+            { "BTHASH" : "DEADBEFF81680083" },
+        ),
+        ( "RHTSupport",
+            { "URL" : "https://support.corp.com/ticket=12345",
+              "MSG" : "New customer case 12345" }
+        )
+    ]
+
+Note:
+
+We will not convert the format of reported_to to JSON and use it for storing
+solutions, because the solutions will have own element and the file reported_to
+is just a list of reports and should not be overloaded.
+-->
+            <!-- <property name='reports' type='a{sa{sv}}' access='read'> -->
             <property name='reports' type='a{sss}' access='read'>
                 <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
             </property>
@@ -336,46 +395,76 @@ for path in prblms:
                 <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
 
-            <method name='GetTextElements'>
+<!--
+Getters and setters
+===================
+We need to decided whether we want have more, specialized functions or less,
+configurable functions. According to D-Bus API Design Guidelines, it is a good
+idea to use flag fields in method calls.
+
+There is a question that needs to be answered for both approaches:
+1. What should happen if the caller wants an element of not supported type?
+
+
+Use the type Variable in the getters:
+`````````````````````````````````````
+method GetTextElements(in as, out a{ss})
+    returns a list of values of text elements
+    1. return an error or treat it as missing
+
+and method OpenElements(in as, out a{su})
+    returns a list of file descriptors to both kind of elements
+    1. everything is a file descriptor, so the caller has to recognize the
+       type of the elements on his own
+
+OR:
+
+method ReadElements(in asi, out a{sv})
+    returns binary elements as UNIX file descriptors and text elements as strings
+    i == flags
+        * NO FLAGS -> open both binary and text elements
+        * ALL FD -> return everything as UNIX file descriptors
+        * ONLY TEXT -> get only text elements
+        * ONLY BINARY -> get only binary elements
+        ? ONLY BIG TEXT -> or treat this as BINARY?
+
+    1. client has to recognize the return type and behave appropriately
+     1.a (ONLY TEXT) return an error or treat it as missing
+     1.b (ONLY TEXT | ALL FD) the caller knows what to do
+     1.c (ONLY BINARY) the caller has to recognize the type of the elements on
+         his own
+     1.d (ONLY BINARY | ALL FD) the same as 1.c
+
+The method ReadElements is more error prone because clients need to write code
+checking the return type. But the method is more flexible because of the
+argument flags, so it would be better to use this variant.
+
+
+Use the type Variable in the setters:
+`````````````````````````````````````
+method SaveTextElements(in ass)
+method SaveElements(in asu)
+
+OR:
+
+method SaveElements(in asv)
+
+The Variable variant is definitely more convenient for users!
+-->
+
+            <method name='ReadElements'>
                 <tp:docstring>Gets a value of problem's element which are store as text files.</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>A list of names of required info. If type of a requested element does not match the type specified in the argument 'i', the element will be ignored and its value will not be included in the response.</tp:docstring>
                 </arg>
 
-                <arg type='i' name='flags' directory='in'>
-                    <tp:docstring>Enables selection of the allowed type and the type of return values.
-                        <variablelist>
-                            <varlistentry>
-                                <term>0 : NO_FLAGS</term>
-                                <listitem><para>Do not check element types and return text elements as D-Bus strings, big text elements as UNIX file descriptors and binary elements as UNIX file descriptors too.</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>1 : ALL_FD</term>
-                                <listitem><para>The returned values will be file descriptors for all element types (text, big text and binary)</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>2 : ALL_TYPES</term>
-                                <listitem><para>(TODO : I am not sure what I had on mind. I will remove this term later.)</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>4 : ONLY_TEXT</term>
-                                <listitem><para>Only those elements that are of text type are read and their contents are returned as D-Bus strings by default.</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>8 : ONLY_BIG_TEXT</term>
-                                <listitem><para>Only those elements that are of binary type are read and their contents are returned as UNIX file descriptors</para></listitem>
-                            </varlistentry>
-                            <varlistentry>
-                                <term>16 : ONLY_BINARY</term>
-                                <listitem><para>Only those elements that are of big text type are read and their contents are returned as UNIX file descriptors</para></listitem>
-                            </varlistentry>
-                        </variablelist>
-                    </tp:docstring>
+                <art type='i' name='flags' directory='in'>
+                    <tp:docstring>NO_FALGS, ALL_FD, ALL_ELEMENTS, ONLY_TEXT, ONLY_BIG_TEXT, ONLY_BINARY</tp:docstring>
                 </arg>
 
                 <arg type='a{sv}' name='response' direction='out'>
-                    <tp:docstring>Dictionary here the key is a requested element name and the value is the element's value.</tp:docstring>
+                    <tp:docstring>A list of values of the requested elements.</tp:docstring>
                 </arg>
                 <tp:docstring>
                     <example id="ReadElements_example_python">
@@ -395,7 +484,7 @@ proxy = bus.get_object("org.freedesktop.problems",
 problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
 for prblmprx in problems.GetProblems():
-    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems2.Entry')
+    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems.Entry')
     kv = prblm.ReadElements(prblmid, ["time", "count", "package", "reason"], ONLY_TEXT)
 
     date = datetime.fromtimestamp(float(kv["time"]))
@@ -411,33 +500,15 @@ for prblmprx in problems.GetProblems():
 
             </method>
 
-            <method name='OpenElements'>
-                <tp:docstring>Returns lisf of file descriptors to the requested problem elements.</tp:docstring>
-
-                <arg type='as' name='elements' direction='in'>
-                    <tp:docstring>A set of problem element names to open for reading.</tp:docstring>
-                </arg>
-
-                <arg type='a{si}' name='value' direction='in'>
-                    <tp:docstring>The file descriptors.</tp:docstring>
-                </arg>
-
-            </method>
-
-            <method name='SaveTextElements'>
-                <tp:docstring>Creates or updates text problem elements.</tp:docstring>
-
-                <arg type='a{ss}' name='name' direction='in'>
-                    <tp:docstring>The problem elements with their values.</tp:docstring>
-                </arg>
-
-            </method>
-
             <method name='SaveElements'>
                 <tp:docstring>Creates or updates problem elements for file descriptors.</tp:docstring>
 
-                <arg type='a{si}' name='name' direction='in'>
+                <arg type='a{sv}' name='name' direction='in'>
                     <tp:docstring>The problem elements with their file descriptors.</tp:docstring>
+                </arg>
+
+                <arg type='i' name='flags' direction='in'>
+                    <tp:docstring>This argument might be used in future to allow the caller to choose whether he want to overrite the elements of truncate them.</tp:docstring>
                 </arg>
 
             </method>
