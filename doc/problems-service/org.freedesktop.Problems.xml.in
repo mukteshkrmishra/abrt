@@ -318,6 +318,12 @@ We will not convert the format of reported_to to JSON and use it for storing
 solutions, because the solutions will have own element and the file reported_to
 is just a list of reports and should not be overloaded.
 -->
+
+<!--
+TODO:
+We have to provide a way to edit the reports (add/remove/update) without
+the need to touch raw data.
+-->
             <!-- <property name='reports' type='a{sa{sv}}' access='read'> -->
             <property name='reports' type='a{sss}' access='read'>
                 <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
@@ -346,6 +352,15 @@ is just a list of reports and should not be overloaded.
             <property name='is_reportable' type='b' access='read'>
                 <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
+<!--
+TODO:
+Generic property getter
+=======================
+
+It is expectable that we will need to add new properties. We can handle it by
+adding a new D-Bus property and force consumers to write their code ready for
+the missing properties or we can add a method returning variant or better a{sv}.
+-->
 
 <!--
 Getters and setters
