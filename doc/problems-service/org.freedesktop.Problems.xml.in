@@ -217,7 +217,13 @@ for path in prblms:
                 </arg>
 
                 <arg type='a{s(its)}' name='problem_data' direction='out'>
-                    <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members. The first one is libreport's flags (problem_data.h), the second one is element size in Bytes and the last one is element's contents (data for CD_FLAG_TXT, file path for CD_FLAG_BIN and CD_FLAG_BIGTXT)</tp:docstring>
+                    <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members:
+                    <orderedlist>
+                        <listitem><para>libreport's flags (problem_data.h)</para></listitem>
+                        <listitem><para>element size in Bytes</para></listitem>
+                        <listitem><para>element's contents (data for CD_FLAG_TXT, file path for CD_FLAG_BIN and CD_FLAG_BIGTXT)</para></listitem>
+                    </orderedlist>
+                    </tp:docstring>
                 </arg>
             </method>
             <method name='DeleteProblems'>
@@ -296,7 +302,15 @@ for path in prblms:
             </property>
 
             <property name='package' type='(sssss)' access='read'>
-                <tp:docstring>Full name, epoch, name, version, release of the package which the crashed program belongs to.</tp:docstring>
+                <tp:docstring>Information about the package which the crashed program belongs to:
+                <orderedlist>
+                    <listitem><para>full name</para></listitem>
+                    <listitem><para>epoch</para></listitem>
+                    <listitem><para>name</para></listitem>
+                    <listitem><para>version</para></listitem>
+                    <listitem><para>release</para></listitem>
+                </orderedlist>
+                </tp:docstring>
             </property>
 
             <property name='uuid' type='s' access='read'>
@@ -368,12 +382,12 @@ is just a list of reports and should not be overloaded.
 -->
 
 <!--
-TODO:
 We have to provide a way to edit the reports (add/remove/update) without
 the need to touch raw data.
+====
+SetSemanticElement() provides the way to modify 'reports' property.
 -->
             <property name='reports' type='a{sa{sv}}' access='read'>
-            <!-- <property name='reports' type='a{sss}' access='read'> -->
                 <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
             </property>
 
@@ -390,7 +404,11 @@ the need to touch raw data.
             </property>
 
             <property name='elements' type='as' access='read'>
-                <tp:docstring>List of all elements the problem have.</tp:docstring>
+                <tp:docstring>List of all elements the problem data contains.</tp:docstring>
+            </property>
+
+            <property name='semantic_elements' type='as' access='read'>
+                <tp:docstring>List of supported semantic elements.</tp:docstring>
             </property>
 
             <property name='is_reported' type='b' access='read'>
@@ -401,7 +419,6 @@ the need to touch raw data.
                 <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
 <!--
-TODO:
 Generic property getter
 =======================
 
@@ -409,7 +426,25 @@ It is expectable that we will need to add new properties. We can handle it by
 adding a new D-Bus property and force consumers to write their code ready for
 the missing properties or we can add a method returning variant or better a{sv}.
 -->
+            <method name='GetSemanticElement'>
+                <tp:docstring>Gets semantic values of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements.</tp:docstring>
 
+                <arg type='as' name='element_names' direction='in'>
+                    <tp:docstring>Requested element names.</tp:docstring>
+                </arg>
+
+                <arg type='a{sv}' name='values' direction='out'>
+                    <tp:docstring>A dictionary where keys are element names and values depend on the implementation of 'org.freedesktop.Problems2'.</tp:docstring>
+                </arg>
+            </method>
+
+            <method name='SetSemanticElement'>
+                <tp:docstring>Sets semantic value of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements.</tp:docstring>
+
+                <arg type='a{sv}' name='values' direction='in'>
+                    <tp:docstring>A dictionary where keys are element names and values depend on the implementation of 'org.freedesktop.Problems2'.</tp:docstring>
+                </arg>
+            </method>
 <!--
 Getters and setters
 ===================
@@ -468,14 +503,41 @@ The Variable variant is definitely more convenient for users!
 -->
 
             <method name='ReadElements'>
-                <tp:docstring>Gets a value of problem's element which are store as text files.</tp:docstring>
+                <tp:docstring>Gets a raw value of problem's element.</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>A list of names of required info. If type of a requested element does not match the type specified in the argument 'i', the element will be ignored and its value will not be included in the response.</tp:docstring>
                 </arg>
 
                 <arg type='i' name='flags' directory='in'>
-                    <tp:docstring>NO_FALGS, ALL_FD, ALL_ELEMENTS, ONLY_TEXT, ONLY_BIG_TEXT, ONLY_BINARY</tp:docstring>
+                    <tp:docstring>Enables selection of the allowed type and the type of return values.
+                        <variablelist>
+                            <varlistentry>
+                                <term>0 : NO_FLAGS</term>
+                                <listitem><para>Do not check element types and return text elements as D-Bus strings, big text elements as UNIX file descriptors and binary elements as UNIX file descriptors too.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1 : ALL_FD</term>
+                                <listitem><para>The returned values will be file descriptors for all element types (text, big text and binary)</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>2 : ALL_TYPES</term>
+                                <listitem><para>(TODO : I am not sure what I had on mind. I will remove this term later.)</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>4 : ONLY_TEXT</term>
+                                <listitem><para>Only those elements that are of text type are read and their contents are returned as D-Bus strings by default.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>8 : ONLY_BIG_TEXT</term>
+                                <listitem><para>Only those elements that are of binary type are read and their contents are returned as UNIX file descriptors</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>16 : ONLY_BINARY</term>
+                                <listitem><para>Only those elements that are of big text type are read and their contents are returned as UNIX file descriptors</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                    </tp:docstring>
                 </arg>
 
                 <arg type='a{sv}' name='response' direction='out'>
@@ -516,14 +578,29 @@ for prblmprx in problems.GetProblems():
             </method>
 
             <method name='SaveElements'>
-                <tp:docstring>Creates or updates problem elements for file descriptors.</tp:docstring>
+                <tp:docstring>Creates or updates raw values of the given problem elements</tp:docstring>
 
-                <arg type='a{sv}' name='name' direction='in'>
-                    <tp:docstring>The problem elements with their file descriptors.</tp:docstring>
+                <arg type='a{sv}' name='elements' direction='in'>
+                    <tp:docstring>The problem elements and their values of one of the fllowing types:
+                    <variablelist>
+                        <varlistentry>
+                            <term>s</term>
+                            <listitem><para>text data</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>ay</term>
+                            <listitem><para>binary data</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>h</term>
+                            <listitem><para>file descriptor</para></listitem>
+                        </varlistentry>
+                    </variablelist>
+                   </tp:docstring>
                 </arg>
 
                 <arg type='i' name='flags' direction='in'>
-                    <tp:docstring>This argument might be used in future to allow the caller to choose whether he want to overrite the elements of truncate them.</tp:docstring>
+                    <tp:docstring>This argument can be used in future to allow the caller to choose whether he want to append the elements or truncate them.</tp:docstring>
                 </arg>
 
             </method>
@@ -550,20 +627,73 @@ for prblmprx in problems.GetProblems():
     <node name='/org/freedesktop/Problems2/session/xxx'>
 
         <interface name='org.freedesktop.Problems2.Session'>
-            <tp:docstring>The Session holds information about the client</tp:docstring>
+            <tp:docstring>Session objects hold information about identity of clients. A session object is created automatically when a new client makes connection. Clients are treated as an anonymous users until they are authorized in 'Authorize' method.</tp:docstring>
 
             <property name='is_authorized' type='b' access='read'>
-                <tp:docstring>TODO</tp:docstring>
+                <tp:docstring>TRUE if the client is authorized; otherwise FALSE.</tp:docstring>
             </property>
 
             <method name='Authorize'>
-                <tp:docstring>TODO</tp:docstring>
+                <tp:docstring></tp:docstring>
+
+                <arg type='s' name='window-id' direction='in'>
+                    <tp:docstring>A window handle to use when showing a pop up.</tp:docstring>
+                </arg>
+
+                <arg type='b' name='synchronous' direction='in'>
+                    <tp:docstring>If FALSE, the method returns immediately after an authorization request is accepted; otherwise the method blocks until the authorization request is finished.</tp:docstring>
+                </arg>
+
+                <arg type='i' name='result' direction='out'>
+                    <tp:docstring>
+                        <variablelist>
+                            <varlistentry>
+                                <term>-1</term>
+                                <listitem><para>An error occurred</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>0</term>
+                                <listitem><para>The authorization request has succeeded and the client is now authorized.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1</term>
+                                <listitem><para>The authorization request has been accepted (only if the synchronous argument was TRUE).</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>2</term>
+                                <listitem><para>The previous authorization request is not finished yet (only if the synchronous argument was TRUE).</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                    </tp:docstring>
+                </arg>
             </method>
 
             <method name='Close'>
-                <tp:docstring>TODO</tp:docstring>
+                <tp:docstring>Disposes the current session object and drops all authorization tokens. If the client makes a further action, a new session object on the same path will be created.</tp:docstring>
             </method>
 
+            <signal name='AuthorizationChanged'>
+                <tp:docstring>Notifies the changes of state of authorization.</tp:docstring>
+
+                <arg type='i' name='status' direction='out'>
+                    <tp:docstring>Describes the change that happened and can be one of the following values:
+                        <variablelist>
+                            <varlistentry>
+                                <term>-1</term>
+                                <listitem><para>The recent authorization request has failed.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>0</term>
+                                <listitem><para>The recent authorization request has succeeded and the client is now authorized.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1</term>
+                                <listitem><para>Authorization has been lost.</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                    </tp:docstring>
+                </arg>
+            </signal>
         </interface>
 
     </node>
