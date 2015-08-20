@@ -406,16 +406,38 @@ a response message to a received micro-report. The list of reports is stored in
 'reported_to' element and the list of solutions is joined into a single string
 and is stored in 'not-reportable' element.
 
-There is a proposal for extending the response:
+The current implementation prevents us from sending 'suggestions', because once
+'not-reportable' element is created, the problem is not reportable any more.
+
+There is a proposal for extending the FAF response format which will mitigate
+the problem described above:
 https://github.com/abrt/faf/wiki/Improved-solutions-protocol
 
-            <property name='solutions' type='a(sssssi)' access='read'>
-                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
-            </property>
+The new format introduces 'bugs' and 'solutions' keys in the response object
+and values of those objects are not easily transformable to ABRT already
+existing problem elements.
 
-            <property name='bugs' type='a(sssi)' access='read'>
-                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
-            </property>
+FAF response bugs in 'reported_to' element:
+===========================================
+We can save value of 'bugs' key in 'reported_to' element but we
+have to introduce a new key "CERTAINTY" in the reported_to entry format.
+
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+| JSON key   | 'reported_to' entry key
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+| bugtracker | "stored as a prefix the entry and followed by ':'"
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+| title      | MSG
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+| url        | URL
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+| certainty  | CERTAINTY
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+FAF response solutions:
+=======================
+Save values of solutions whose certainty value equals 100 in 'not-reportable'
+element. Serialize entire solution key value to 'solutions' element.
 -->
             <property name='resolution' type='s' access='read'>
                 <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
