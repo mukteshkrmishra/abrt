@@ -340,13 +340,35 @@ the need to touch raw data.
 SetSemanticElement() provides the way to modify 'reports' property.
 -->
             <property name='reports' type='a{sa{sv}}' access='read'>
-                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report informations (URL, "https://bugzilla.redhat.com/1000000").</tp:docstring>
+                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report information ("URL", "https://bugzilla.redhat.com/1000000").</tp:docstring>
             </property>
 
             <property name='reason' type='s' access='read'>
                 <tp:docstring>A brief description of what caused the problem.</tp:docstring>
             </property>
 
+<!--
+'not-reportable' element vs. FAF solutions
+``````````````````````````````````````````
+
+The former is created by ABRT tools, the latter is linked to micro-reports.
+
+The current FAF HTTP API returns a list of reports and a list of solutions in
+a response message to a received micro-report. The list of reports is stored in
+'reported_to' element and the list of solutions is joined into a single string
+and is stored in 'not-reportable' element.
+
+There is a proposal for extending the response:
+https://github.com/abrt/faf/wiki/Improved-solutions-protocol
+
+            <property name='solutions' type='a(sssssi)' access='read'>
+                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+            </property>
+
+            <property name='bugs' type='a(sssi)' access='read'>
+                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+            </property>
+-->
             <property name='resolution' type='s' access='read'>
                 <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
