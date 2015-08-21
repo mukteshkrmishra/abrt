@@ -413,7 +413,8 @@ element and another property for 'solutions' element.
 
 The first draft of the API used to expose 'not-reportable' element in a
 property called 'resolution'. The name was chosen because the name
-'not-reportable' does not induce useful connotations.
+'not-reportable' does not induce useful connotations (the name looks like a
+name for a boolean value instead of a description).
 
 Since we need to expose 'solution' elements and exposing the element as a new
 property called 'solution' sounds mos natural, we should consider renaming
@@ -424,6 +425,19 @@ Proposed names:
 * technical_description
 * technical_details
 -->
+            <property name='solutions' type='a(sssssi)' access='read'>
+                <tp:docstring>List of solutions that are a structrure with these members:
+                    <orderedlist>
+                        <listitem><para>solution type</para></listitem>
+                        <listitem><para>title</para></listitem>
+                        <listitem><para>URL</para></listitem>
+                        <listitem><para>note_text</para></listitem>
+                        <listitem><para>note_hml</para></listitem>
+                        <listitem><para>ceratinty</para></listitem>
+                    </orderedlist>
+                </tp:docstring>
+            </property>
+
             <property name='technical_description' type='s' access='read'>
                 <tp:docstring>Technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
