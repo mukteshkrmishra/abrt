@@ -437,7 +437,26 @@ have to introduce a new key "CERTAINTY" in the reported_to entry format.
 FAF response solutions:
 =======================
 Save values of solutions whose certainty value equals 100 in 'not-reportable'
-element. Serialize entire solution key value to 'solutions' element.
+element. Use the current algorithm for building the final 'not-reportable' text
+value.
+
+Introduce a new problem element called 'solutions' and serialized the value of
+'solutions' object to the new problem element. The serialization format will be
+JSON.
+
+Adoption of FAF solutions in the D-Bus interface
+=================================================
+The chosen transformation schema requires one property for 'not-reportable'
+element and another property for 'solutions' element.
+
+The first draft of the API used to expose 'not-reportable' element in a
+property called 'resolution'. The name was chosen because the name
+'not-reportable' does not induce useful connotations.
+
+Since we need to expose 'solution' elements and exposing the element as a new
+property called 'solution' sounds mos natural, we should consider renaming
+'resolution' property, because exposing both 'solutions' and 'resolution'
+properties might be confusing.
 -->
             <property name='resolution' type='s' access='read'>
                 <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
