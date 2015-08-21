@@ -269,15 +269,19 @@ for path in prblms:
                 <tp:docstring>The uid of the crashed program.</tp:docstring>
             </property>
 
-            <property name='username' type='s' access='read'>
+            <property name='user' type='s' access='read'>
                 <tp:docstring>The user name associated with the uid.</tp:docstring>
+            </property>
+
+            <property name='hostname' type='s' access='read'>
+                <tp:docstring>Name of the host where the problem occurred</tp:docstring>
             </property>
 
             <property name='type' type='s' access='read'>
                 <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby).</tp:docstring>
             </property>
 
-            <property name='detected' type='t' access='read'>
+            <property name='first_occurrence' type='t' access='read'>
                 <tp:docstring>The unix time when the problem entry was created.</tp:docstring>
             </property>
 
@@ -440,6 +444,12 @@ Save values of solutions whose certainty value equals 100 in 'not-reportable'
 element. Use the current algorithm for building the final 'not-reportable' text
 value.
 
+'not-reportable' element cannot be obsolete because ABRT tools creates the
+element to mark the newly created problem as not reportable. The existence of
+the element is tested by ABRT Reporting Clients and if the element exists, the
+client terminates the reporting process (at the beginning and in the middle as
+well).
+
 Introduce a new problem element called 'solutions' and serialized the value of
 'solutions' object to the new problem element. The serialization format will be
 JSON.
@@ -457,9 +467,13 @@ Since we need to expose 'solution' elements and exposing the element as a new
 property called 'solution' sounds mos natural, we should consider renaming
 'resolution' property, because exposing both 'solutions' and 'resolution'
 properties might be confusing.
+
+Proposed names:
+* technical_description
+* technical_details
 -->
-            <property name='resolution' type='s' access='read'>
-                <tp:docstring>More technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+            <property name='technical_description' type='s' access='read'>
+                <tp:docstring>Technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
 
             <property name='desktop_file' type='s' access='read'>
@@ -471,15 +485,19 @@ properties might be confusing.
             </property>
 
             <property name='semantic_elements' type='as' access='read'>
-                <tp:docstring>List of supported semantic elements.</tp:docstring>
+                <tp:docstring>List of supported semantic elements in GetSemanticElement and SetSemanticElement methods.</tp:docstring>
             </property>
 
             <property name='is_reported' type='b' access='read'>
                 <tp:docstring>True if someone took the time to file a ticket in the bugctracking system of OS.</tp:docstring>
             </property>
 
-            <property name='is_reportable' type='b' access='read'>
+            <property name='can_be_reported' type='b' access='read'>
                 <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
+            </property>
+
+            <property name='is_remote' type='b' access='read'>
+                <tp:docstring>True if the problem data has been uploaded by another host.</tp:docstring>
             </property>
 <!--
 Generic property getter
@@ -490,7 +508,7 @@ adding a new D-Bus property and force consumers to write their code ready for
 the missing properties or we can add a method returning variant or better a{sv}.
 -->
             <method name='GetSemanticElement'>
-                <tp:docstring>Gets semantic values of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements.</tp:docstring>
+                <tp:docstring>Gets semantic values of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements. It is an error to call this method with an element that is not listed in the property 'semantic_elements'</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>Requested element names.</tp:docstring>
@@ -502,7 +520,7 @@ the missing properties or we can add a method returning variant or better a{sv}.
             </method>
 
             <method name='SetSemanticElement'>
-                <tp:docstring>Sets semantic value of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements.</tp:docstring>
+                <tp:docstring>Sets semantic value of problem's elements. Each implementation of 'org.freedesktop.Problems2' supports their own Semantic Elements. It is an error to call this method with an element that is not listed in the property 'semantic_elements'</tp:docstring>
 
                 <arg type='a{sv}' name='values' direction='in'>
                     <tp:docstring>A dictionary where keys are element names and values depend on the implementation of 'org.freedesktop.Problems2'.</tp:docstring>
