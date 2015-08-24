@@ -424,6 +424,9 @@ properties might be confusing.
 Proposed names:
 * technical_description
 * technical_details
+
+We have chosen 'technical_details' because the suffix 'details' does not imply
+a paragraph of human readable text, so it could hold a structured text.
 -->
             <property name='solutions' type='a(sssssi)' access='read'>
                 <tp:docstring>List of solutions that are a structrure with these members:
@@ -438,7 +441,7 @@ Proposed names:
                 </tp:docstring>
             </property>
 
-            <property name='technical_description' type='s' access='read'>
+            <property name='technical_details' type='s' access='read'>
                 <tp:docstring>Technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
 
