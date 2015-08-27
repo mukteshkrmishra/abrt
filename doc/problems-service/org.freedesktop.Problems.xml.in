@@ -210,7 +210,7 @@ for path in prblms:
             </method>
 
             <method name='GetProblemData'>
-                <tp:docstring>Gets an equivalent of libreport's ProblemData for the given problem entry.</tp:docstring>
+                <tp:docstring>Gets an equivalent of libreport's ProblemData for the given problem entry ($INCLUDE_DIR/libreport/problem_data.h).</tp:docstring>
 
                 <arg type='o' name='problem_object' direction='in'>
                     <tp:docstring>Problem Entry path used to get the problem data.</tp:docstring>
@@ -219,9 +219,24 @@ for path in prblms:
                 <arg type='a{s(its)}' name='problem_data' direction='out'>
                     <tp:docstring>The results is a dicitionary where the key is problem element name (e.g. package, maps, coredump) and the value is a structure with three members:
                     <orderedlist>
-                        <listitem><para>libreport's flags (problem_data.h)</para></listitem>
-                        <listitem><para>element size in Bytes</para></listitem>
-                        <listitem><para>element's contents (data for CD_FLAG_TXT, file path for CD_FLAG_BIN and CD_FLAG_BIGTXT)</para></listitem>
+                        <listitem><para>libreport flags ($INCLUDE_DIR/libreport/problem_data.h)</para></listitem>
+                        <listitem><para>real file size in Bytes</para></listitem>
+                        <listitem><para>a representation of the element depending on the libreport flags</para>
+                        <variablelist>
+                            <varlistentry>
+                                <term>CD_FLAG_TXT</term>
+                                <listitem><para>file contents</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>CD_FLAG_BIN</term>
+                                <listitem><para>file path</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>CD_FLAG_BIGTXT</term>
+                                <listitem><para>file path</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                        </listitem>
                     </orderedlist>
                     </tp:docstring>
                 </arg>
@@ -238,7 +253,7 @@ for path in prblms:
                 <tp:docstring>A new system problem has been detected.</tp:docstring>
 
                 <arg type='o' name='problem_object' direction='out'>
-                    <tp:docstring>An identifier of the newly created problem.</tp:docstring>
+                    <tp:docstring>An identifier of the detected problem.</tp:docstring>
                 </arg>
 
                 <arg type='s' name='uid' direction='out'>
@@ -278,7 +293,7 @@ for path in prblms:
             </property>
 
             <property name='type' type='s' access='read'>
-                <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby).</tp:docstring>
+                <tp:docstring>The type of the problem (CCpp, Python, Kerneloops, Java, Ruby, ...).</tp:docstring>
             </property>
 
             <property name='first_occurrence' type='t' access='read'>
@@ -302,7 +317,7 @@ for path in prblms:
             </property>
 
             <property name='component' type='s' access='read'>
-                <tp:docstring>The component which the package belogns to.</tp:docstring>
+                <tp:docstring>The component which the package belongs to.</tp:docstring>
             </property>
 
             <property name='package' type='(sssss)' access='read'>
@@ -392,7 +407,26 @@ the need to touch raw data.
 SetSemanticElement() provides the way to modify 'reports' property.
 -->
             <property name='reports' type='a{sa{sv}}' access='read'>
-                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report information ("URL", "https://bugzilla.redhat.com/1000000").</tp:docstring>
+                <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report information ("URL", "https://bugzilla.redhat.com/1000000"). Known information types are the following:
+                    <variablelist>
+                        <varlistentry>
+                            <term>URL</term>
+                            <listitem><para>An URL</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>BTHASH</term>
+                            <listitem><para>An indentifier of the problem returned by ABRT server</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>MSG</term>
+                            <listitem><para>A message</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>CERTAINTY</term>
+                            <listitem><para>This type can appear only together with a entry of the "URL" type. Its value is an integer and represents perctual relevance to of the URL to the problem.</para></listitem>
+                        </varlistentry>
+                    </variablelist>
+                </tp:docstring>
             </property>
 
             <property name='reason' type='s' access='read'>
@@ -477,20 +511,20 @@ We have chosen 'technical_details' because the suffix 'details' does not imply
 a paragraph of human readable text, so it could hold a structured text.
 -->
             <property name='solutions' type='a(sssssi)' access='read'>
-                <tp:docstring>List of solutions that are a structrure with these members:
+                <tp:docstring>List of solutions that are a structrure with these members (which are self-explanatory):
                     <orderedlist>
                         <listitem><para>solution type</para></listitem>
                         <listitem><para>title</para></listitem>
                         <listitem><para>URL</para></listitem>
                         <listitem><para>note_text</para></listitem>
-                        <listitem><para>note_hml</para></listitem>
-                        <listitem><para>ceratinty</para></listitem>
+                        <listitem><para>note_html</para></listitem>
+                        <listitem><para>certainty</para></listitem>
                     </orderedlist>
                 </tp:docstring>
             </property>
 
             <property name='technical_details' type='s' access='read'>
-                <tp:docstring>Technical details about the problem usally containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
+                <tp:docstring>Technical details about the problem usually containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
 
             <property name='desktop_file' type='s' access='read'>
@@ -502,19 +536,19 @@ a paragraph of human readable text, so it could hold a structured text.
             </property>
 
             <property name='semantic_elements' type='as' access='read'>
-                <tp:docstring>List of supported semantic elements in GetSemanticElement and SetSemanticElement methods.</tp:docstring>
+                <tp:docstring>List of all semantic elements that can be handled by GetSemanticElement and SetSemanticElement methods.</tp:docstring>
             </property>
 
             <property name='is_reported' type='b' access='read'>
-                <tp:docstring>True if someone took the time to file a ticket in the bugctracking system of OS.</tp:docstring>
+                <tp:docstring>True if someone took the time to file a ticket in the OS's default bug tracking system.</tp:docstring>
             </property>
 
             <property name='can_be_reported' type='b' access='read'>
-                <tp:docstring>True if it is possible to file a ticket in the bugctracking system of OS.</tp:docstring>
+                <tp:docstring>TRUE if it is possible to file a ticket in the OS's default bug tracking system.</tp:docstring>
             </property>
 
             <property name='is_remote' type='b' access='read'>
-                <tp:docstring>True if the problem data has been uploaded by another host.</tp:docstring>
+                <tp:docstring>TRUE if the problem data has been uploaded by another host.</tp:docstring>
             </property>
 <!--
 Generic property getter
@@ -601,7 +635,7 @@ The Variable variant is definitely more convenient for users!
 -->
 
             <method name='ReadElements'>
-                <tp:docstring>Gets a raw value of problem's element.</tp:docstring>
+                <tp:docstring>Gets a raw value of a problem's element.</tp:docstring>
 
                 <arg type='as' name='element_names' direction='in'>
                     <tp:docstring>A list of names of required info. If type of a requested element does not match the type specified in the argument 'i', the element will be ignored and its value will not be included in the response.</tp:docstring>
@@ -639,7 +673,7 @@ The Variable variant is definitely more convenient for users!
                 </arg>
 
                 <arg type='a{sv}' name='response' direction='out'>
-                    <tp:docstring>A list of values of the requested elements.</tp:docstring>
+                    <tp:docstring>Dictionary here the key is a requested element name and the value is the element's value.</tp:docstring>
                 </arg>
                 <tp:docstring>
                     <example id="ReadElements_example_python">
@@ -704,10 +738,10 @@ for prblmprx in problems.GetProblems():
             </method>
 
             <method name='DeleteElements'>
-                <tp:docstring>Deletes problem's element.</tp:docstring>
+                <tp:docstring>Deletes the listed problem's elements.</tp:docstring>
 
                 <arg type='as' name='name' direction='in'>
-                    <tp:docstring>The list of deleted problem element.</tp:docstring>
+                    <tp:docstring>The list of deleted problem elements.</tp:docstring>
                 </arg>
 
             </method>
