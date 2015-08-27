@@ -90,8 +90,6 @@
                     <tp:docstring>An indentifier of the new problem</tp:docstring>
                 </arg>
 
-                <!-- TODO fix these examples -->
-
                 <tp:docstring>
                     <example id="NewProblem_example_python">
                         <title>How to create a new problems in Python</title>
@@ -131,12 +129,19 @@ dbus-send --system --type=method_call --print-reply \
                 </tp:docstring>
             </method>
 
+            <method name='GetSession'>
+                <tp:docstring>Returns a session object which implements the org.freedesktop.Problems2.Session interface.</tp:docstring>
+
+                <arg type='o' name='session' direction='out'>
+                    <tp:docstring>An object path</tp:docstring>
+                </arg>
+            </method>
 
             <method name='GetProblems'>
                 <tp:docstring>Returns a list of problem identifiers for problems visible by the caller. If the session is authorized (GetSession), then the method returns all detected problems (system problems and problems of other users).</tp:docstring>
 
                 <arg type='ao' name='response' direction='out'>
-                    <tp:docstring>List of problem identifiers</tp:docstring>
+                    <tp:docstring>List of problem objects paths</tp:docstring>
                 </arg>
 
                 <tp:docstring>
@@ -693,7 +698,7 @@ proxy = bus.get_object("org.freedesktop.problems",
 problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
 for prblmprx in problems.GetProblems():
-    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems.Entry')
+    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems2.Entry')
     kv = prblm.ReadElements(prblmid, ["time", "count", "package", "reason"], ONLY_TEXT)
 
     date = datetime.fromtimestamp(float(kv["time"]))
