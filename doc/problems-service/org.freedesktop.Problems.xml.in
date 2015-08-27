@@ -90,8 +90,6 @@
                     <tp:docstring>An indentifier of the new problem</tp:docstring>
                 </arg>
 
-                <!-- TODO fix these examples -->
-
                 <tp:docstring>
                     <example id="NewProblem_example_python">
                         <title>How to create a new problems in Python</title>
@@ -103,9 +101,9 @@ import dbus
 bus = dbus.SystemBus()
 
 proxy = bus.get_object("org.freedesktop.problems",
-                                  '/org/freedesktop/problems')
+                                  '/org/freedesktop/problems2')
 
-problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.problems')
+problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
 description = {"analyzer"    : "libreport",
                "reason"      : "Application has been killed",
@@ -122,8 +120,8 @@ problems.NewProblem(description)
 <![CDATA[
 #!/usr/bin/bash
 dbus-send --system --type=method_call --print-reply \
-          --dest=org.freedesktop.problems /org/freedesktop/problems \
-          org.freedesktop.problems.NewProblem \
+          --dest=org.freedesktop.problems /org/freedesktop/problems2 \
+          org.freedesktop.Problems2.NewProblem \
           dict:string:string:analyzer,libreport,reason,"Application has been killed",backtrace,"die()",executable,"/usr/bin/true"
 ]]>
                         </programlisting>
@@ -131,12 +129,19 @@ dbus-send --system --type=method_call --print-reply \
                 </tp:docstring>
             </method>
 
+            <method name='GetSession'>
+                <tp:docstring>Returns a session object which implements the org.freedesktop.Problems2.Session interface.</tp:docstring>
+
+                <arg type='o' name='session' direction='out'>
+                    <tp:docstring>An object path</tp:docstring>
+                </arg>
+            </method>
 
             <method name='GetProblems'>
-                <tp:docstring>Gets a list of problem identifiers for problems visible by the caller.</tp:docstring>
+                <tp:docstring>Returns a list of problem identifiers for problems visible by the caller. If the session is authorized (GetSession), then the method returns all detected problems (system problems and problems of other users).</tp:docstring>
 
                 <arg type='ao' name='response' direction='out'>
-                    <tp:docstring>List of problem identifiers</tp:docstring>
+                    <tp:docstring>List of problem objects paths</tp:docstring>
                 </arg>
 
                 <tp:docstring>
@@ -150,10 +155,58 @@ import dbus
 bus = dbus.SystemBus()
 
 proxy = bus.get_object("org.freedesktop.problems",
-                                  '/org/freedesktop/problems')
+                                  '/org/freedesktop/problems2')
 
-problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.problems')
+problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 prblms = problems.GetProblems()
+
+for path in prblms:
+    prblm_proxy = dbus.get_object("org.freedesktop.problems", path)
+    prblm = dbus.Interface(prblm_proxy, "org.freedesktop.Problems2.Entry")
+
+    print(prblm.executable)
+    print(prblm.reason)
+    print()
+]]>
+                        </programlisting>
+                    </example>
+                </tp:docstring>
+
+                <tp:docstring>
+                    <example id="GetProblems_authorized_example_python">
+                        <title>How to get the list of user problems and system problems in Python</title>
+                        <programlisting>
+<![CDATA[
+#!/usr/bin/env python
+import sys
+import dbus
+
+bus = dbus.SystemBus()
+
+proxy = bus.get_object("org.freedesktop.problems",
+                                  '/org/freedesktop/problems2')
+
+problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
+
+session_path = problems.GetSession()
+
+session_proxy = bus.get_object("org.freedesktop.problems", session_path)
+session = dbus.Interface(session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
+
+result = session.Authorize(None, True)
+if result != 0:
+    print("Cannot authorize")
+    sys.exit(1)
+
+prblms = problems.GetProblems()
+
+for path in prblms:
+    prblm_proxy = dbus.get_object("org.freedesktop.problems", path)
+    prblm = dbus.Interface(prblm_proxy, "org.freedesktop.Problems2.Entry")
+
+    print(prblm.executable)
+    print(prblm.reason)
+    print()
 ]]>
                         </programlisting>
                     </example>
@@ -640,12 +693,12 @@ from datetime import datetime
 bus = dbus.SystemBus()
 
 proxy = bus.get_object("org.freedesktop.problems",
-                          '/org/freedesktop/problems')
+                          '/org/freedesktop/problems2')
 
-problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.problems')
+problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
 for prblmprx in problems.GetProblems():
-    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems.Entry')
+    prblm  = dbus.Interface(prblmprx, dbus_interface='org.freedesktop.Problems2.Entry')
     kv = prblm.ReadElements(prblmid, ["time", "count", "package", "reason"], ONLY_TEXT)
 
     date = datetime.fromtimestamp(float(kv["time"]))
