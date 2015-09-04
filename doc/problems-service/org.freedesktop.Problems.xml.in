@@ -21,7 +21,7 @@
      *
     -->
 
-    <node name='/org/freedesktop/Problems2'>
+    <node name='/org/freedesktop/problems2'>
 
         <interface name='org.freedesktop.Problems2'>
             <tp:docstring>The Problems Service manages all the crashes.</tp:docstring>
@@ -276,7 +276,7 @@ for path in prblms:
      *
     -->
 
-    <node name='/org/freedesktop/Problems2/xxx'>
+    <node name='/org/freedesktop/Problems2/Entry/xxx'>
 
         <interface name='org.freedesktop.Problems2.Entry'>
             <tp:docstring>The Entry represents single problem.</tp:docstring>
@@ -761,7 +761,7 @@ for prblmprx in problems.GetProblems():
      *
     -->
 
-    <node name='/org/freedesktop/Problems2/session/xxx'>
+    <node name='/org/freedesktop/Problems2/Session/xxx'>
 
         <interface name='org.freedesktop.Problems2.Session'>
             <tp:docstring>Session objects hold information about identity of clients. A session object is created automatically when a new client makes connection. Clients are treated as an anonymous users until they are authorized in 'Authorize' method.</tp:docstring>
