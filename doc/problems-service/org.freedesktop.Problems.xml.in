@@ -646,7 +646,7 @@ The Variable variant is definitely more convenient for users!
                     <tp:docstring>A list of names of required info. If type of a requested element does not match the type specified in the argument 'i', the element will be ignored and its value will not be included in the response.</tp:docstring>
                 </arg>
 
-                <arg type='i' name='flags' directory='in'>
+                <arg type='i' name='flags' direction='in'>
                     <tp:docstring>Enables selection of the allowed type and the type of return values.
                         <variablelist>
                             <varlistentry>
