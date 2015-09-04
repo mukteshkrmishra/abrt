@@ -36,11 +36,9 @@
                     </xsl:call-template>
                 </xsl:when>
                 <xsl:when test="$node//@type">
-                    <xsl:message>++++</xsl:message>
                     <xsl:call-template name="DBusType">
                         <xsl:with-param name="type" select="$node//@type"/>
                     </xsl:call-template>
-                    <xsl:message>++++</xsl:message>
                 </xsl:when>
                 <xsl:otherwise>
                     <xsl:message terminate="yes">
@@ -77,11 +75,6 @@
         <xsl:param name="closure"/>
         <xsl:param name="start"/>
 
-        <xsl:message>----</xsl:message>
-        <xsl:message>type:='<xsl:value-of select="$type"/>'</xsl:message>
-        <xsl:message>closure:='<xsl:value-of select="$closure"/>'</xsl:message>
-        <xsl:message>start:='<xsl:value-of select="$start"/>'</xsl:message>
-        <xsl:message>----</xsl:message>
         <xsl:if test="$type!=''">
             <xsl:choose>
                 <xsl:when test="starts-with($type, 'o')">
