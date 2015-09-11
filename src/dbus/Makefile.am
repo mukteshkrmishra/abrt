@@ -24,9 +24,10 @@ abrt_dbus_LDADD = \
     -labrt_dbus
 
 abrt_problems2_SOURCES = \
-    abrt_problems2_generated_interfaces.h \
     abrt_problems2_service.c \
-    abrt_problems2_service.h
+    abrt_problems2_service.h \
+    abrt_problems2_node.c \
+    abrt_problems2_node.h
 
 abrt_problems2-abrt_problems2_service.$(OBJEXT):  abrt_problems2_generated_interfaces.h
 
@@ -35,12 +36,14 @@ abrt_problems2_CPPFLAGS = \
     -I$(srcdir)/../lib \
     -DVAR_RUN=\"$(VAR_RUN)\" \
     $(GIO_CFLAGS) \
+    $(GIO_UNIX_CFLAGS) \
     $(DBUS_CFLAGS) \
     $(LIBREPORT_CFLAGS) \
     $(POLKIT_CFLAGS) \
     -D_GNU_SOURCE
 abrt_problems2_LDADD = \
     $(GIO_LIBS) \
+    $(GIO_UNIX_LIBS) \
     ../lib/libabrt.la \
     $(LIBREPORT_LIBS) \
     $(POLKIT_LIBS) \

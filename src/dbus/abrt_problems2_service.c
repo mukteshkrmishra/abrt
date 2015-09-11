@@ -20,15 +20,112 @@
 #include "libabrt.h"
 #include "abrt_problems2_generated_interfaces.h"
 #include "abrt_problems2_service.h"
+#include "abrt_problems2_node.h"
 
 GMainLoop *g_loop;
 int g_timeout_value = 10;
 GDBusNodeInfo *g_problems2_node;
 
+int abrt_problems2_service_caller_authorized(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller)
+{
+    return 0;
+}
+
+uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller)
+{
+    if (abrt_problems2_service_caller_authorized(connection, invocation, caller))
+        return 0;
+
+    return abrt_problems2_service_caller_real_uid(connection, invocation, caller);
+}
+
+uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller)
+{
+    GError *error = NULL;
+    guint caller_uid;
+
+    GDBusProxy * proxy = g_dbus_proxy_new_sync(connection,
+                                     G_DBUS_PROXY_FLAGS_NONE,
+                                     NULL,
+                                     "org.freedesktop.DBus",
+                                     "/org/freedesktop/DBus",
+                                     "org.freedesktop.DBus",
+                                     NULL,
+                                     &error);
+
+    GVariant *result = g_dbus_proxy_call_sync(proxy,
+                                     "GetConnectionUnixUser",
+                                     g_variant_new ("(s)", caller),
+                                     G_DBUS_CALL_FLAGS_NONE,
+                                     -1,
+                                     NULL,
+                                     &error);
+
+    if (result == NULL)
+    {
+        /* we failed to get the uid, so return (uid_t) -1 to indicate the error
+         */
+        if (error)
+        {
+            g_dbus_method_invocation_return_dbus_error(invocation,
+                                      "org.freedesktop.problems.InvalidUser",
+                                      error->message);
+            g_error_free(error);
+        }
+        else
+        {
+            g_dbus_method_invocation_return_dbus_error(invocation,
+                                      "org.freedesktop.problems.InvalidUser",
+                                      _("Unknown error"));
+        }
+        return (uid_t) -1;
+    }
+
+    g_variant_get(result, "(u)", &caller_uid);
+    g_variant_unref(result);
+
+    log_info("Caller uid: %i", caller_uid);
+    return caller_uid;
+}
+
+bool allowed_problem_dir(const char *dir_name)
+{
+    if (!dir_is_in_dump_location(dir_name))
+    {
+        error_msg("Bad problem directory name '%s', should start with: '%s'", dir_name, g_settings_dump_location);
+        return false;
+    }
+
+    if (!dir_has_correct_permissions(dir_name, DD_PERM_DAEMONS))
+    {
+        error_msg("Problem directory '%s' has invalid owner, groop or mode", dir_name);
+        return false;
+    }
+
+    return true;
+}
+
+
 static void on_bus_acquired(GDBusConnection *connection,
                             const gchar     *name,
                             gpointer         user_data)
 {
+    GError *error = NULL;
+    /* Register the interface parsed from a XML file */
+    log("Registering PATH %s iface %s\n", ABRT_P2_PATH, g_problems2_node->interfaces[0]->name);
+    guint registration_id = g_dbus_connection_register_object(connection,
+            ABRT_P2_PATH,
+            g_problems2_node->interfaces[0],
+            abrt_problems2_node_vtable(),
+            /*user data*/NULL,
+            /*destroy notify*/NULL,
+            &error);
+
+    if (registration_id == 0)
+    {
+        error_msg("Could not register object '%s': %s", ABRT_P2_PATH, error->message);
+        g_error_free(error);
+    }
 }
 
 static void on_name_acquired(GDBusConnection *connection,

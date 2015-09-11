@@ -15,16 +15,11 @@
   with this program; if not, write to the Free Software Foundation, Inc.,
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
-#ifndef ABRT_PROBLEMS2_SERVICE_H
-#define ABRT_PROBLEMS2_SERVICE_H
+#ifndef ABRT_PROBLEMS2_NODE_H
+#define ABRT_PROBLEMS2_NODE_H
 
-#define ABRT_P2_BUS "org.freedesktop.problems"
-#define ABRT_P2_PATH "/org/freedesktop/Problems2"
-#define ABRT_P2_NS "org.freedesktop.Problems2"
-#define ABRT_P2_NS_MEMBER(name) ABRRT_P2_NS"."##name
+#include <gio/gio.h>
 
-int abrt_problems2_service_caller_authorized(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
-uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
-uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
+GDBusInterfaceVTable *abrt_problems2_node_vtable(void);
 
-#endif/*ABRT_PROBLEMS2_SERVICE_H*/
+#endif/*ABRT_PROBLEMS2_NODE_H*/
