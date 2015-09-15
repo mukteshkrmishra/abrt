@@ -23,11 +23,16 @@ abrt_dbus_LDADD = \
     $(POLKIT_LIBS) \
     -labrt_dbus
 
+# TODO abrt-polkit to noninst library
 abrt_problems2_SOURCES = \
+    abrt-polkit.c \
+    abrt-polkit.h \
     abrt_problems2_service.c \
     abrt_problems2_service.h \
     abrt_problems2_node.c \
-    abrt_problems2_node.h
+    abrt_problems2_node.h \
+    abrt_problems2_session_node.c \
+    abrt_problems2_session_node.h
 
 abrt_problems2-abrt_problems2_service.$(OBJEXT):  abrt_problems2_generated_interfaces.h
 

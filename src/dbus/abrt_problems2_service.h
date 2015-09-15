@@ -21,10 +21,17 @@
 #define ABRT_P2_BUS "org.freedesktop.problems"
 #define ABRT_P2_PATH "/org/freedesktop/Problems2"
 #define ABRT_P2_NS "org.freedesktop.Problems2"
-#define ABRT_P2_NS_MEMBER(name) ABRRT_P2_NS"."##name
+#define ABRT_P2_NS_MEMBER(name) ABRT_P2_NS"."name
 
-int abrt_problems2_service_caller_authorized(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
-uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
-uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller);
+const char *abrt_problems2_get_session_path(GDBusConnection *connection, const char *caller, GError **error);
+uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, const char *caller, GError **error);
+uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, const char *caller, GError **error);
+
+#define ABRT_PROBLEMS2_ERROR (g_quark_from_static_string("abrt-problems2-error"))
+
+enum
+{
+    ABRT_PROBLEMS2_INVALID_SESSION,
+};
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

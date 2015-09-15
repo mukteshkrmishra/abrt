@@ -124,23 +124,30 @@ static void dbus_method_call(GDBusConnection *connection,
 
     uid_t caller_uid;
     GVariant *response;
-    caller_uid = abrt_problems2_service_caller_uid(connection, invocation, caller);
+
+    GError *error = NULL;
+    caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    if (caller_uid == (uid_t) -1)
+    {
+        g_dbus_method_invocation_return_gerror(invocation, error);
+        return;
+    }
 
     if (strcmp("NewProblem", method_name) == 0)
     {
-        char *error = NULL;
+        char *err_msg = NULL;
 
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        char *problem_id = handle_new_problem(g_variant_get_child_value(parameters, 0), caller_uid, fd_list, &error);
+        char *problem_id = handle_new_problem(g_variant_get_child_value(parameters, 0), caller_uid, fd_list, &err_msg);
 
         if (!problem_id)
         {
             g_dbus_method_invocation_return_dbus_error(invocation,
                                                       "org.freedesktop.problems.Failure",
-                                                      error);
-            free(error);
+                                                      err_msg);
+            free(err_msg);
             return;
         }
         /* else */
@@ -152,6 +159,20 @@ static void dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("GetSession", method_name) == 0)
     {
+        GError *error = NULL;
+        const char *session_path = abrt_problems2_get_session_path(connection, caller, &error);
+
+        if (!session_path)
+        {
+            g_dbus_method_invocation_return_dbus_error(invocation,
+                                                      "org.freedesktop.problems.Failure",
+                                                      error->message);
+            g_free(error);
+            return;
+        }
+
+        response = g_variant_new("(o)", session_path);
+        g_dbus_method_invocation_return_value(invocation, response);
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
