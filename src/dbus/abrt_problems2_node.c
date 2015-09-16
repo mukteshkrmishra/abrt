@@ -1,13 +1,21 @@
 #include "libabrt.h"
+#include "abrt_glib.h"
+#include "problem_api.h"
+
 #include "abrt_problems2_node.h"
 #include "abrt_problems2_service.h"
 #include <gio/gunixfdlist.h>
 
 #define STRINGIZE(literal) #literal
 
-static char *handle_new_problem(GVariant *problem_info, uid_t caller_uid, GUnixFDList *fd_list, char **error)
+static const char *handle_new_problem(GDBusConnection *connection,
+                                      GVariant *problem_info,
+                                      uid_t caller_uid,
+                                      GUnixFDList *fd_list,
+                                      char **error)
 {
     char *problem_id = NULL;
+    const char *new_path = NULL;
     problem_data_t *pd = problem_data_new();
 
     GVariantIter *iter;
@@ -91,7 +99,8 @@ static char *handle_new_problem(GVariant *problem_info, uid_t caller_uid, GUnixF
     /* At least it should generate local problem identifier UUID */
     problem_data_add_basics(pd);
 
-    problem_id = problem_data_save(pd);
+    new_path = abrt_problems2_service_save_problem(connection, pd, &problem_id);
+
     if (problem_id)
         notify_new_path(problem_id);
     else if (error)
@@ -99,7 +108,8 @@ static char *handle_new_problem(GVariant *problem_info, uid_t caller_uid, GUnixF
 
 finito:
     problem_data_free(pd);
-    return problem_id;
+    free(problem_id);
+    return new_path;
 }
 
 /* D-Bus method handler
@@ -140,9 +150,13 @@ static void dbus_method_call(GDBusConnection *connection,
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        char *problem_id = handle_new_problem(g_variant_get_child_value(parameters, 0), caller_uid, fd_list, &err_msg);
+        const char *new_path = handle_new_problem(connection,
+                                g_variant_get_child_value(parameters, 0),
+                                caller_uid,
+                                fd_list,
+                                &err_msg);
 
-        if (!problem_id)
+        if (!new_path)
         {
             g_dbus_method_invocation_return_dbus_error(invocation,
                                                       "org.freedesktop.problems.Failure",
@@ -151,9 +165,8 @@ static void dbus_method_call(GDBusConnection *connection,
             return;
         }
         /* else */
-        response = g_variant_new("(s)", problem_id);
+        response = g_variant_new("(o)", new_path);
         g_dbus_method_invocation_return_value(invocation, response);
-        free(problem_id);
 
         return;
     }
@@ -176,11 +189,23 @@ static void dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
+        GVariantBuilder *builder = g_variant_builder_new(G_VARIANT_TYPE("ao"));
+
+        GList *problem_nodes = abrt_problems2_service_get_problems_nodes(caller_uid);
+        for (GList *p = problem_nodes; p != NULL; p = g_list_next(p))
+            g_variant_builder_add(builder, "o", (char*)p->data);
+        g_list_free(problem_nodes);
+
+        response = g_variant_new("(ao)", builder);
+        g_variant_builder_unref(builder);
+
+        g_dbus_method_invocation_return_value(invocation, response);
+        return;
     }
     else if (strcmp("GetProblemData", method_name) == 0)
     {
     }
-    else if (strcmp("DeleteProblmes", method_name) == 0)
+    else if (strcmp("DeleteProblems", method_name) == 0)
     {
     }
     else

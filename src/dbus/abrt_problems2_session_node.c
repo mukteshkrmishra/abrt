@@ -76,8 +76,7 @@ static struct p2s_node *get_session(const gchar *caller,
         {
             log_warning("Problems2 Session object does not belong to UID %d", caller_uid);
 
-            g_set_error(error,
-                    ABRT_PROBLEMS2_ERROR, ABRT_PROBLEMS2_INVALID_SESSION,
+            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                     "Your Problems2 Session is broken. Check system logs for more details.");
 
             return NULL;
@@ -232,7 +231,10 @@ static void dbus_method_call(GDBusConnection *connection,
         }
 
         g_dbus_method_invocation_return_value(invocation, NULL);
+
+        /* TODO: This should be handled by the service module */
         g_dbus_connection_unregister_object(connection, node->p2s_regid);
+
         g_hash_table_remove(nodes_table(), node->p2s_caller);
 
         return;

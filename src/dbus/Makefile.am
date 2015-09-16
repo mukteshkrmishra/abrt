@@ -32,7 +32,9 @@ abrt_problems2_SOURCES = \
     abrt_problems2_node.c \
     abrt_problems2_node.h \
     abrt_problems2_session_node.c \
-    abrt_problems2_session_node.h
+    abrt_problems2_session_node.h \
+    abrt_problems2_entry_node.c \
+    abrt_problems2_entry_node.h
 
 abrt_problems2-abrt_problems2_service.$(OBJEXT):  abrt_problems2_generated_interfaces.h
 

@@ -69,11 +69,20 @@ def test_real_problem(tf):
                        "executable"  : "/usr/bin/foo",
                        "services"    : dbus.types.UnixFd(services_file)}
 
-        p = tf.p2.NewProblem(description)
-        if not p:
+        tf.problem_id = tf.p2.NewProblem(description)
+        if not tf.problem_id:
             print("FAILURE : empty return value")
     return False
 
+def test_get_problems(tf):
+    print("TEST GET PROBLEMS")
+
+    p = tf.p2.GetProblems()
+    if not p:
+        print("FAILURE: no problems")
+    if not tf.problem_id in p:
+        print("FAILURE: missing our problem")
+    return False
 
 def test_get_session(tf):
     print("TEST GET SESSION")
@@ -147,6 +156,7 @@ tf = TestFrame()
 
 test_fake_binary_type(tf)
 test_real_problem(tf)
+test_get_problems(tf)
 test_get_session(tf)
 
 tf.ac_signal_occurrences = []
@@ -163,3 +173,4 @@ test_close(tf)
 tf.wait_for_signals()
 
 test_close_signal(tf)
+

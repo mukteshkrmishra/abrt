@@ -18,16 +18,19 @@
 
 #include <gio/gio.h>
 #include "libabrt.h"
+#include "problem_api.h"
 #include "abrt_problems2_generated_interfaces.h"
 #include "abrt_problems2_service.h"
 #include "abrt_problems2_node.h"
 #include "abrt_problems2_session_node.h"
+#include "abrt_problems2_entry_node.h"
 
 static GMainLoop *g_loop;
 static int g_timeout_value = 10;
 static GDBusNodeInfo *g_problems2_node;
 static GDBusNodeInfo *g_problems2_session_node;
-//static GDBusNodeInfo *g_problems2_entry_node;
+static GDBusNodeInfo *g_problems2_entry_node;
+static GHashTable *g_problems2_entries;
 
 static struct p2s_node *register_session_object(GDBusConnection *connection,
         const char *caller,
@@ -47,7 +50,7 @@ static struct p2s_node *register_session_object(GDBusConnection *connection,
     GError *error = NULL;
 
     /* Register the interface parsed from a XML file */
-    log("Registering PATH %s iface %s\n", path, g_problems2_session_node->interfaces[0]->name);
+    log("Registering PATH %s iface %s", path, g_problems2_session_node->interfaces[0]->name);
     guint registration_id = g_dbus_connection_register_object(connection,
             path,
             g_problems2_session_node->interfaces[0],
@@ -153,21 +156,87 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
     return caller_uid;
 }
 
-bool allowed_problem_dir(const char *dir_name)
+void *abrt_problems2_service_get_node(const char *path)
 {
-    if (!dir_is_in_dump_location(dir_name))
+    return (void *)g_hash_table_lookup(g_problems2_entries, path);
+}
+
+static const char *register_dump_dir_entry_node(GDBusConnection *connection, const char *dd_dirname)
+{
+    char hash_str[SHA1_RESULT_LEN*2 + 1];
+    str_to_sha1str(hash_str, dd_dirname);
+    char *path = xasprintf(ABRT_P2_PATH"/Entry/%s", hash_str);
+
+    GError *error = NULL;
+
+    /* Register the interface parsed from a XML file */
+    log("Registering PATH %s iface %s", path, g_problems2_entry_node->interfaces[0]->name);
+    guint registration_id = g_dbus_connection_register_object(connection,
+            path,
+            g_problems2_entry_node->interfaces[0],
+            abrt_problems2_entry_node_vtable(),
+            /*user data*/NULL,
+            /*destroy notify*/NULL,
+            &error);
+
+    if (registration_id == 0)
     {
-        error_msg("Bad problem directory name '%s', should start with: '%s'", dir_name, g_settings_dump_location);
-        return false;
+        error_msg("Could not register object '%s': %s", path, error->message);
+        free(path);
+        g_error_free(error);
+
+        return NULL;
     }
 
-    if (!dir_has_correct_permissions(dir_name, DD_PERM_DAEMONS))
+    char *const dup_dirname = xstrdup(dd_dirname);
+    struct p2e_node *entry = abrt_problems2_entry_node_new(dup_dirname);
+
+    /* the hash table takes ownership of path and entry */
+    g_hash_table_insert(g_problems2_entries, path, entry);
+
+    return path;
+}
+
+const char *abrt_problems2_service_save_problem(GDBusConnection *connection, problem_data_t *pd, char **problem_id)
+{
+    char *new_problem_id = problem_data_save(pd);
+
+    if (new_problem_id == NULL)
+        return NULL;
+
+    const char *entry_node_path = register_dump_dir_entry_node(connection, new_problem_id);
+
+    if (problem_id != NULL)
+        *problem_id = new_problem_id;
+    else
+        free(new_problem_id);
+
+    return entry_node_path;
+}
+
+GList *abrt_problems2_service_get_problems_nodes(uid_t uid)
+{
+    GList *paths = NULL;
+
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, g_problems2_entries);
+
+    const char *p;
+    struct p2e_node *entry;
+    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&entry))
     {
-        error_msg("Problem directory '%s' has invalid owner, groop or mode", dir_name);
-        return false;
+        if (abrt_problems2_entry_node_accessible_by_uid(entry, uid, NULL))
+            paths = g_list_prepend(paths, (gpointer)p);
     }
 
-    return true;
+    return paths;
+}
+
+static int bridge_register_dump_dir_entry_node(struct dump_dir *dd, void *connection)
+{
+    /* Ignore return value */
+    register_dump_dir_entry_node(connection, dd->dd_dirname);
+    return 0;
 }
 
 static void on_bus_acquired(GDBusConnection *connection,
@@ -176,7 +245,7 @@ static void on_bus_acquired(GDBusConnection *connection,
 {
     GError *error = NULL;
     /* Register the interface parsed from a XML file */
-    log("Registering PATH %s iface %s\n", ABRT_P2_PATH, g_problems2_node->interfaces[0]->name);
+    log("Registering PATH %s iface %s", ABRT_P2_PATH, g_problems2_node->interfaces[0]->name);
     guint registration_id = g_dbus_connection_register_object(connection,
             ABRT_P2_PATH,
             g_problems2_node->interfaces[0],
@@ -190,6 +259,8 @@ static void on_bus_acquired(GDBusConnection *connection,
         error_msg("Could not register object '%s': %s", ABRT_P2_PATH, error->message);
         g_error_free(error);
     }
+
+    for_each_problem_in_dir(g_settings_dump_location, (uid_t)-1, bridge_register_dump_dir_entry_node, connection);
 }
 
 static void on_name_acquired(GDBusConnection *connection,
@@ -220,6 +291,7 @@ int main(int argc, char *argv[])
 
     glib_init();
     abrt_init(argv);
+    load_abrt_conf();
 
     const char *program_usage_string = _(
         "& [options]"
@@ -243,15 +315,20 @@ int main(int argc, char *argv[])
     if (getuid() != 0)
         error_msg_and_die(_("This program must be run as root."));
 
-
     GError *error = NULL;
     g_problems2_node = g_dbus_node_info_new_for_xml(g_org_freedesktop_Problems2_xml, &error);
     if (error != NULL)
-        error_msg_and_die("Could not parse the default internface: %s", error->message);
+        error_msg_and_die("Could not parse the default interface: %s", error->message);
 
     g_problems2_session_node = g_dbus_node_info_new_for_xml(g_org_freedesktop_Problems2_Session_xml, &error);
     if (error != NULL)
-        error_msg_and_die("Could not parse Session internface: %s", error->message);
+        error_msg_and_die("Could not parse Session interface: %s", error->message);
+
+    g_problems2_entry_node = g_dbus_node_info_new_for_xml(g_org_freedesktop_Problems2_Entry_xml, &error);
+    if (error != NULL)
+        error_msg_and_die("Could not parse Session interface: %s", error->message);
+
+    g_problems2_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)abrt_problems2_entry_node_free);
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
                               ABRT_P2_BUS,

@@ -18,6 +18,8 @@
 #ifndef ABRT_PROBLEMS2_SERVICE_H
 #define ABRT_PROBLEMS2_SERVICE_H
 
+#include <libreport/problem_data.h>
+
 #define ABRT_P2_BUS "org.freedesktop.problems"
 #define ABRT_P2_PATH "/org/freedesktop/Problems2"
 #define ABRT_P2_NS "org.freedesktop.Problems2"
@@ -27,11 +29,10 @@ const char *abrt_problems2_get_session_path(GDBusConnection *connection, const c
 uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, const char *caller, GError **error);
 uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, const char *caller, GError **error);
 
-#define ABRT_PROBLEMS2_ERROR (g_quark_from_static_string("abrt-problems2-error"))
+const char *abrt_problems2_service_save_problem(GDBusConnection *connection, problem_data_t *pd, char **problem_id);
 
-enum
-{
-    ABRT_PROBLEMS2_INVALID_SESSION,
-};
+void *abrt_problems2_service_get_node(const char *path);
+
+GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

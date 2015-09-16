@@ -86,8 +86,8 @@
                 </arg>
                 <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QHash&lt;QString,QString&gt;"/>
 
-                <arg type='s' name='problem_id' direction='out'>
-                    <tp:docstring>An indentifier of the new problem</tp:docstring>
+                <arg type='o' name='entry' direction='out'>
+                    <tp:docstring>Object path of the new problem</tp:docstring>
                 </arg>
 
                 <tp:docstring>
