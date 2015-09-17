@@ -30,6 +30,7 @@ uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, const char 
 uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, const char *caller, GError **error);
 
 const char *abrt_problems2_service_save_problem(GDBusConnection *connection, problem_data_t *pd, char **problem_id);
+int abrt_problems2_service_remove_problem(GDBusConnection *connection, const char *entry_path, uid_t caller_uid, GError **error);
 
 void *abrt_problems2_service_get_node(const char *path);
 

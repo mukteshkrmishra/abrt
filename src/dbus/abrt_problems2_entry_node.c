@@ -45,15 +45,16 @@ void abrt_problems2_entry_node_free(struct p2e_node *entry)
 int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t uid, struct dump_dir **dd)
 {
     struct dump_dir *tmp = dd_opendir(entry->p2e_dirname,   DD_OPEN_FD_ONLY
-                                                | DD_FAIL_QUIETLY_ENOENT
-                                                | DD_FAIL_QUIETLY_EACCES);
+                                                          | DD_FAIL_QUIETLY_ENOENT
+                                                          | DD_FAIL_QUIETLY_EACCES);
     if (tmp == NULL)
     {
         VERB2 perror_msg("can't open problem directory '%s'", entry->p2e_dirname);
         return -ENOTDIR;
     }
 
-    int ret = dd_accessible_by_uid(tmp, uid);
+    int ret = dd_accessible_by_uid(tmp, uid) ? 0 : -EACCES;
+
     if (dd == NULL)
         dd_close(tmp);
     else
@@ -62,6 +63,33 @@ int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t ui
     return ret;
 }
 
+int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error)
+{
+    struct dump_dir *dd = NULL;
+    int ret = abrt_problems2_entry_node_accessible_by_uid(entry, caller_uid, &dd);
+
+    if (ret != 0)
+        return ret;
+
+    dd = dd_fdopendir(dd, DD_DONT_WAIT_FOR_LOCK);
+    if (dd == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Cannot lock the problem. Check system logs.");
+        return -EWOULDBLOCK;
+    }
+
+    ret = dd_delete(dd);
+
+    if (ret != 0)
+    {
+        dd_close(dd);
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Failed to remove problem data. Check system logs.");
+    }
+
+    return ret;
+}
 
 struct p2e_node *get_entry(GDBusConnection *connection,
                           const gchar *caller,

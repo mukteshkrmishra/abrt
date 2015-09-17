@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import os
+import sys
 import time
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -84,6 +85,67 @@ def test_get_problems(tf):
         print("FAILURE: missing our problem")
     return False
 
+def test_delete_problems(tf):
+    print("TEST DELETE PROBLEMS")
+
+    description = {"analyzer"    : "libreport",
+                   "type"        : "libreport",
+                   "reason"      : "Application has been killed",
+                   "backtrace"   : "die()",
+                   "executable"  : "/usr/bin/sh",
+                   "duphash"     : None,
+                   "uuid"        : None}
+
+    description["duphash"] = description["uuid"] = "DEADBEEF"
+    one = tf.p2.NewProblem(description)
+
+    description["duphash"] = description["uuid"] = "81680083"
+    two = tf.p2.NewProblem(description)
+
+    description["duphash"] = description["uuid"] = "FFFFFFFF"
+    three = tf.p2.NewProblem(description)
+
+    p = tf.p2.GetProblems()
+    if not(one in p and two in p and three in p):
+        print("FAILURE: problems not detected")
+
+    tf.p2.DeleteProblems([one])
+
+    p = tf.p2.GetProblems()
+    if one in p:
+        print("FAILURE: 'one' not removed")
+
+    if not(two in p and three in p):
+        print("FAILURE: 'two' and 'three' disappeared")
+
+    try:
+        tf.p2.DeleteProblems([two, three, one])
+        print("FAILURE: did not detected invalid entry address")
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
+            print("FAILURE: invalid exception error")
+
+    p = tf.p2.GetProblems()
+    if two in p and three in p:
+        print("FAILURE: 'two' and 'three' not removed")
+
+    tf.p2.DeleteProblems([])
+
+    try:
+        tf.p2.DeleteProblems(["/invalid/path"])
+        print("FAILURE: did not detected invalid entry address")
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
+            print("FAILURE: invalid exception error")
+
+    try:
+        tf.p2.DeleteProblems(["/org/freedesktop/Problems2/Entry/FAKE"])
+        print("FAILURE: did not detected invalid entry address")
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
+            print("FAILURE: invalid exception error")
+
+
 def test_get_session(tf):
     print("TEST GET SESSION")
 
@@ -157,6 +219,8 @@ tf = TestFrame()
 test_fake_binary_type(tf)
 test_real_problem(tf)
 test_get_problems(tf)
+test_delete_problems(tf)
+
 test_get_session(tf)
 
 tf.ac_signal_occurrences = []

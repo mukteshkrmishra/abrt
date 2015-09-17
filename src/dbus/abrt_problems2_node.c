@@ -186,6 +186,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
         response = g_variant_new("(o)", session_path);
         g_dbus_method_invocation_return_value(invocation, response);
+        return;
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
@@ -207,10 +208,29 @@ static void dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("DeleteProblems", method_name) == 0)
     {
+        GError *error = NULL;
+        GVariant *array = g_variant_get_child_value(parameters, 0);
+
+        GVariantIter *iter;
+        gchar *entry_node;
+        g_variant_get(array, "ao", &iter);
+        while (g_variant_iter_loop(iter, "o", &entry_node))
+        {
+            if (abrt_problems2_service_remove_problem(connection, entry_node, caller_uid, &error) != 0)
+            {
+                g_dbus_method_invocation_return_gerror(invocation, error);
+                g_error_free(error);
+                return;
+            }
+        }
+
+        g_dbus_method_invocation_return_value(invocation, NULL);
+        return;
     }
-    else
-    {
-    }
+
+    error_msg("BUG: org.freedesktop.Problems2 does not have method: %s", method_name);
+    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
+            "The method has to be implemented");
 }
 
 GDBusInterfaceVTable *abrt_problems2_node_vtable(void)
