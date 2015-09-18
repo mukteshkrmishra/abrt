@@ -9,17 +9,25 @@ from gi.repository import GLib
 
 BUS_NAME="org.freedesktop.problems"
 
+DBUS_ERROR_BAD_ADDRESS="org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist"
+DBUS_ERROR_ACCESS_DENIED_READ="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to access the problem"
+DBUS_ERROR_ACCESS_DENIED_DELETE="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to delete the problem"
 
 class TestFrame(object):
 
-    def __init__(self):
+    def __init__(self, non_root_uid):
         DBusGMainLoop(set_as_default=True)
 
         self.loop = GLib.MainLoop()
-        self.bus = dbus.SystemBus()
-        self.p2_proxy = self.bus.get_object(BUS_NAME,
-                       '/org/freedesktop/Problems2')
 
+        self.root_bus = dbus.SystemBus(private=True)
+        self.root_p2_proxy = self.root_bus.get_object(BUS_NAME, '/org/freedesktop/Problems2')
+        self.root_p2 = dbus.Interface(self.root_p2_proxy, dbus_interface='org.freedesktop.Problems2')
+
+        os.seteuid(non_root_uid)
+
+        self.bus = dbus.SystemBus(private=True)
+        self.p2_proxy = self.bus.get_object(BUS_NAME, '/org/freedesktop/Problems2')
         self.p2 = dbus.Interface(self.p2_proxy, dbus_interface='org.freedesktop.Problems2')
 
         self.ac_signal_occurrences = []
@@ -48,6 +56,13 @@ class TestFrame(object):
         self.tm = GLib.timeout_add(1000, self.interrupt_waiting)
         self.loop.run()
 
+def expect_dbus_error(error, method, *args):
+    try:
+        method(*args)
+        print("FAILURE: Expected D-Bus error: %s" % (error))
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != error:
+            print("FAILURE: caught invalid text:\n\tExpected: %s\n\tGot     :%s\n" % (error, str(ex)))
 
 def test_fake_binary_type(tf):
     print("TEST FAKE BINARY TYPE")
@@ -62,13 +77,8 @@ def test_fake_binary_type(tf):
                        "executable"  : "/usr/bin/foo",
                        "type"        : dbus.types.UnixFd(type_file)}
 
-        try:
-            tf.p2.NewProblem(description)
-            print("FAILURE : an exception expected")
-        except dbus.exceptions.DBusException as ex:
-            if str(ex) != "org.freedesktop.problems.Failure: You are not allowed to create element 'type' containing 'CCpp'":
-                print("FAILURE : wrong message : %s" % (str(ex)))
-    return False
+        expect_dbus_error("org.freedesktop.problems.Failure: You are not allowed to create element 'type' containing 'CCpp'",
+                              tf.p2.NewProblem, description)
 
 
 def test_real_problem(tf):
@@ -94,7 +104,6 @@ def test_real_problem(tf):
             tf.problem_id = tf.p2.NewProblem(description)
             if not tf.problem_id:
                 print("FAILURE : empty return value")
-    return False
 
 
 def test_crash_signal(tf):
@@ -105,10 +114,8 @@ def test_crash_signal(tf):
     else:
         if tf.crash_signal_occurrences[0][0] != tf.problem_id:
             print("FAILURE : Crash signal was emitted with wrong PATH")
-        if tf.crash_signal_occurrences[0][1] != os.getuid():
+        if tf.crash_signal_occurrences[0][1] != os.geteuid():
             print("FAILURE : Crash signal was emitted with wrong UID")
-
-    return False
 
 
 def test_get_problems(tf):
@@ -117,9 +124,12 @@ def test_get_problems(tf):
     p = tf.p2.GetProblems()
     if not p:
         print("FAILURE: no problems")
+
     if not tf.problem_id in p:
         print("FAILURE: missing our problem")
-    return False
+
+    if tf.private_problem_id in p:
+        print("FAILURE: contains private problem")
 
 
 def test_get_problem_data(tf):
@@ -127,19 +137,14 @@ def test_get_problem_data(tf):
 
     #tf.p2.GetProblemData(dbus.types.String())
 
-    try:
-        tf.p2.GetProblemData("/invalid/path")
-        print("FAILURE: did not detected invalid entry address")
-    except dbus.exceptions.DBusException as ex:
-        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
-            print("FAILURE: invalid exception error")
+    expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
+        tf.p2.GetProblemData, "/invalid/path")
 
-    try:
-        tf.p2.GetProblemData("/org/freedesktop/Problems2/Entry/FAKE")
-        print("FAILURE: did not detected invalid entry address")
-    except dbus.exceptions.DBusException as ex:
-        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
-            print("FAILURE: invalid exception error")
+    expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
+        tf.p2.GetProblemData, "/org/freedesktop/Problems2/Entry/FAKE")
+
+    expect_dbus_error(DBUS_ERROR_ACCESS_DENIED_READ,
+            tf.p2.GetProblemData, tf.private_problem_id)
 
     p = tf.p2.GetProblemData(tf.problem_id)
     expected = {
@@ -166,6 +171,45 @@ def test_get_problem_data(tf):
 
         if (g[0] & v[0]) != v[0]:
             print("FAILURE: invalid flags %s : %i" % (k, g[0]))
+
+
+def test_get_private_problem(tf):
+    print("TEST GET PRIVATE PROBLEM")
+
+    p = tf.p2.GetProblems()
+    if not p:
+        print("FAILURE: no problems")
+
+    if not tf.problem_id in p:
+        print("FAILURE: missing our problem")
+
+    if not tf.private_problem_id in p:
+        print("FAILURE: missing private problem")
+
+    p = tf.p2.GetProblemData(tf.private_problem_id)
+
+    if p["uid"][2] != "0":
+        print("FAILURE: invalid UID")
+
+
+def test_private_problem_not_accessible(tf):
+    print("TEST PRIVATE PROBLEM NOT ACCESSIBLE WHEN SESSION IS CLOSED")
+
+    p = tf.p2.GetProblems()
+    if not p:
+        print("FAILURE: no problems")
+
+    if not tf.problem_id in p:
+        print("FAILURE: missing our problem")
+
+    if tf.private_problem_id in p:
+        print("FAILURE: accessible private problem")
+
+    expect_dbus_error(DBUS_ERROR_ACCESS_DENIED_READ,
+            tf.p2.GetProblemData, tf.private_problem_id)
+
+    expect_dbus_error(DBUS_ERROR_ACCESS_DENIED_DELETE,
+            tf.p2.DeleteProblems, [tf.private_problem_id])
 
 
 def test_delete_problems(tf):
@@ -201,12 +245,8 @@ def test_delete_problems(tf):
     if not(two in p and three in p):
         print("FAILURE: 'two' and 'three' disappeared")
 
-    try:
-        tf.p2.DeleteProblems([two, three, one])
-        print("FAILURE: did not detected invalid entry address")
-    except dbus.exceptions.DBusException as ex:
-        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
-            print("FAILURE: invalid exception error")
+    expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
+            tf.p2.DeleteProblems, [two, three, one])
 
     p = tf.p2.GetProblems()
     if two in p and three in p:
@@ -214,19 +254,14 @@ def test_delete_problems(tf):
 
     tf.p2.DeleteProblems([])
 
-    try:
-        tf.p2.DeleteProblems(["/invalid/path"])
-        print("FAILURE: did not detected invalid entry address")
-    except dbus.exceptions.DBusException as ex:
-        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
-            print("FAILURE: invalid exception error")
+    expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
+            tf.p2.DeleteProblems, ["/invalid/path"])
 
-    try:
-        tf.p2.DeleteProblems(["/org/freedesktop/Problems2/Entry/FAKE"])
-        print("FAILURE: did not detected invalid entry address")
-    except dbus.exceptions.DBusException as ex:
-        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
-            print("FAILURE: invalid exception error")
+    expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
+            tf.p2.DeleteProblems, ["/org/freedesktop/Problems2/Entry/FAKE"])
+
+    expect_dbus_error(DBUS_ERROR_ACCESS_DENIED_DELETE,
+            tf.p2.DeleteProblems, [tf.private_problem_id])
 
 
 def test_get_session(tf):
@@ -254,10 +289,6 @@ def test_authrorize(tf):
     if not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
         print("FAILURE : not authorized")
 
-    time.sleep(1)
-
-    return False
-
 
 def test_authrorize_signal(tf):
     print("TEST AUTHORIZE SIGNAL")
@@ -267,7 +298,6 @@ def test_authrorize_signal(tf):
 
     if len(tf.ac_signal_occurrences) == 1 and tf.ac_signal_occurrences[0] != 0:
         print("FAILURE : signal was emitted with wrong number")
-    return False
 
 
 def test_close(tf):
@@ -283,8 +313,6 @@ def test_close(tf):
     if tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
         print("FAILURE : still authorized")
 
-    return False
-
 
 def test_close_signal(tf):
     print("TEST CLOSE SIGNAL")
@@ -294,37 +322,58 @@ def test_close_signal(tf):
 
     if len(tf.ac_signal_occurrences) == 2 and tf.ac_signal_occurrences[1] != 1:
         print("FAILURE : signal was emitted with wrong number")
-    return False
 
 
-tf = TestFrame()
+def create_problem(p2):
+    with open("/usr/bin/true", "r") as bintrue_file:
+        description = {"analyzer"    : "libreport",
+                       "type"        : "libreport",
+                       "reason"      : "Application has been killed",
+                       "backtrace"   : "die()",
+                       "executable"  : "/usr/bin/foo",}
 
-test_fake_binary_type(tf)
+        return p2.NewProblem(description)
 
-tf.crash_signal_occurrences = []
-tf.p2.connect_to_signal("Crash", tf.handle_crash)
 
-test_real_problem(tf)
-tf.wait_for_signals(["Crash"])
+if __name__ == "__main__":
+    if os.getuid() != 0:
+        print("Run this test under root!")
+        sys.exit(1)
 
-test_get_problem_data(tf)
-test_get_problems(tf)
-test_delete_problems(tf)
+    if len(sys.argv) != 2:
+        print("Pass an uid of non-root user as the first argument!")
+        sys.exit(1)
 
-test_get_session(tf)
+    non_root_uid = int(sys.argv[1])
+    tf = TestFrame(non_root_uid)
 
-tf.ac_signal_occurrences = []
-tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
+    test_fake_binary_type(tf)
 
-test_authrorize(tf)
+    tf.crash_signal_occurrences = []
+    tf.p2.connect_to_signal("Crash", tf.handle_crash)
 
-tf.wait_for_signals(["AuthorizationChanged"])
+    test_real_problem(tf)
+    tf.wait_for_signals(["Crash"])
 
-test_authrorize_signal(tf)
+    tf.private_problem_id = create_problem(tf.root_p2)
 
-test_close(tf)
+    test_get_problems(tf)
+    test_get_problem_data(tf)
+    test_delete_problems(tf)
+    test_get_session(tf)
 
-tf.wait_for_signals(["AuthorizationChanged"])
+    tf.ac_signal_occurrences = []
+    tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
 
-test_close_signal(tf)
+    test_authrorize(tf)
 
+    tf.wait_for_signals(["AuthorizationChanged"])
+
+    test_authrorize_signal(tf)
+    test_get_private_problem(tf)
+    test_close(tf)
+
+    tf.wait_for_signals(["AuthorizationChanged"])
+
+    test_close_signal(tf)
+    test_private_problem_not_accessible(tf)

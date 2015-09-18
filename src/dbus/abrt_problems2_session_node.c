@@ -137,6 +137,8 @@ static void dbus_method_call(GDBusConnection *connection,
                         GDBusMethodInvocation *invocation,
                         gpointer    user_data)
 {
+    log_debug("Problems2.Sessions method : %s", method_name);
+
     /* Check sanity */
     if (strcmp(interface_name, "org.freedesktop.Problems2.Session") != 0)
     {
@@ -251,6 +253,8 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
                         GError      **error,
                         gpointer    user_data)
 {
+    log_debug("Problems2.Sessions get property : %s", property_name);
+
     if (strcmp(interface_name, "org.freedesktop.Problems2.Session") != 0)
     {
         error_msg("Unsupported interface %s", interface_name);

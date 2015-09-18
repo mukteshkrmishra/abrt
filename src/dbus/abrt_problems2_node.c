@@ -26,7 +26,7 @@ static const char *handle_new_problem(GDBusConnection *connection,
     {
         if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
         {
-            log("New string: %s", key);
+            log_debug("New string: %s", key);
             const char *real_value = g_variant_get_string(value, /*ignore length*/NULL);
             if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
             {
@@ -38,7 +38,7 @@ static const char *handle_new_problem(GDBusConnection *connection,
         }
         else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
         {
-            log("New file descriptor: %s", key);
+            log_debug("New file descriptor: %s", key);
             /* We need to make sure that the caller does not try to pass
              * prohibited element in form of a binary file.
              *
@@ -70,7 +70,7 @@ static const char *handle_new_problem(GDBusConnection *connection,
 
             char *new_line = strchrnul(real_value, '\n');
             *new_line = '\0';
-            log("Got first line : %s", real_value);
+            log_debug("Got first line : %s", real_value);
 
             if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
             {
@@ -123,7 +123,7 @@ static void dbus_method_call(GDBusConnection *connection,
                         GDBusMethodInvocation *invocation,
                         gpointer    user_data)
 {
-    //abrt_p2_service *srv = (abrt_p2_srv *)user_data;
+    log_debug("Problems2 method : %s", method_name);
 
     /* Check sanity */
     if (strcmp(interface_name, "org.freedesktop.Problems2") != 0)
@@ -234,7 +234,6 @@ static void dbus_method_call(GDBusConnection *connection,
                 continue;
             }
 
-            log("%s: %d", element_name, element_info->flags);
             g_variant_builder_add(response_builder, "{s(its)}",
                                                     element_name,
                                                     element_info->flags,

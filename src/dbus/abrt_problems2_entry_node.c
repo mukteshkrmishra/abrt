@@ -67,9 +67,12 @@ int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, 
 {
     struct dump_dir *dd = NULL;
     int ret = abrt_problems2_entry_node_accessible_by_uid(entry, caller_uid, &dd);
-
     if (ret != 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
+                    "You are not authorized to delete the problem");
         return ret;
+    }
 
     dd = dd_fdopendir(dd, DD_DONT_WAIT_FOR_LOCK);
     if (dd == NULL)
@@ -155,6 +158,8 @@ static void dbus_method_call(GDBusConnection *connection,
                         GDBusMethodInvocation *invocation,
                         gpointer    user_data)
 {
+    log_debug("Problems2.Entry method : %s", method_name);
+
     GError *error = NULL;
     struct dump_dir *dd;
     struct p2e_node *node = get_entry(connection, caller, object_path, &dd, &error);
@@ -212,6 +217,8 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
                         GError      **error,
                         gpointer    user_data)
 {
+    log_debug("Problems2.Entry get property : %s", property_name);
+
     GVariant *retval;
     struct dump_dir *dd;
     struct p2e_node *node = get_entry(connection, caller, object_path, &dd, error);
@@ -334,6 +341,8 @@ static gboolean dbus_set_property(GDBusConnection *connection,
                         GError      **error,
                         gpointer    user_data)
 {
+    log_debug("Problems2.Entry set property : %s", property_name);
+
     struct dump_dir *dd;
     struct p2e_node *node = get_entry(connection, caller, object_path, &dd, error);
     if (node == NULL)
