@@ -261,7 +261,7 @@ for path in prblms:
                     <tp:docstring>An identifier of the detected problem.</tp:docstring>
                 </arg>
 
-                <arg type='s' name='uid' direction='out'>
+                <arg type='i' name='uid' direction='out'>
                     <tp:docstring>UID of user who reported this problem.</tp:docstring>
                 </arg>
             </signal>

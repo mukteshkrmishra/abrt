@@ -234,6 +234,25 @@ const char *abrt_problems2_service_save_problem(GDBusConnection *connection, pro
     else
         free(new_problem_id);
 
+    if (entry_node_path != NULL)
+    {
+        char *uid_str = problem_data_get_content_or_NULL(pd, FILENAME_UID);
+        int uid = uid_str != NULL ? atoi(uid_str) : 0;
+        GVariant *parameters = g_variant_new("(oi)", entry_node_path, uid);
+
+        GDBusMessage *message = g_dbus_message_new_signal (ABRT_P2_PATH, ABRT_P2_NS, "Crash");
+        g_dbus_message_set_sender(message, ABRT_P2_BUS);
+        g_dbus_message_set_body(message, parameters);
+
+        GError *error = NULL;
+        g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
+        if (error != NULL)
+        {
+            error_msg("Failed to emit 'Crash': %s", error->message);
+            g_free(error);
+        }
+    }
+
     return entry_node_path;
 }
 

@@ -30,10 +30,21 @@ class TestFrame(object):
             GLib.Source.remove(self.tm)
 
     def handle_authorization_changed(self, status):
+        if not "AuthorizationChanged" in self.signals:
+            return
+
         self.interrupt_waiting(False)
         self.ac_signal_occurrences.append(status)
 
-    def wait_for_signals(self):
+    def handle_crash(self, entry_path, uid):
+        if not "Crash" in self.signals:
+            return
+
+        self.interrupt_waiting(False)
+        self.crash_signal_occurrences.append((entry_path, uid))
+
+    def wait_for_signals(self, signals):
+        self.signals = signals
         self.tm = GLib.timeout_add(1000, self.interrupt_waiting)
         self.loop.run()
 
@@ -85,6 +96,21 @@ def test_real_problem(tf):
                 print("FAILURE : empty return value")
     return False
 
+
+def test_crash_signal(tf):
+    print("TEST CRASH SIGNAL")
+
+    if len(tf.crash_signal_occurrences) != 1:
+        print("FAILURE : Crash signal wasn't emitted")
+    else:
+        if tf.crash_signal_occurrences[0][0] != tf.problem_id:
+            print("FAILURE : Crash signal was emitted with wrong PATH")
+        if tf.crash_signal_occurrences[0][1] != os.getuid():
+            print("FAILURE : Crash signal was emitted with wrong UID")
+
+    return False
+
+
 def test_get_problems(tf):
     print("TEST GET PROBLEMS")
 
@@ -94,6 +120,7 @@ def test_get_problems(tf):
     if not tf.problem_id in p:
         print("FAILURE: missing our problem")
     return False
+
 
 def test_get_problem_data(tf):
     print("TEST GET PROBLEM DATA")
@@ -273,7 +300,13 @@ def test_close_signal(tf):
 tf = TestFrame()
 
 test_fake_binary_type(tf)
+
+tf.crash_signal_occurrences = []
+tf.p2.connect_to_signal("Crash", tf.handle_crash)
+
 test_real_problem(tf)
+tf.wait_for_signals(["Crash"])
+
 test_get_problem_data(tf)
 test_get_problems(tf)
 test_delete_problems(tf)
@@ -285,13 +318,13 @@ tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_
 
 test_authrorize(tf)
 
-tf.wait_for_signals()
+tf.wait_for_signals(["AuthorizationChanged"])
 
 test_authrorize_signal(tf)
 
 test_close(tf)
 
-tf.wait_for_signals()
+tf.wait_for_signals(["AuthorizationChanged"])
 
 test_close_signal(tf)
 
