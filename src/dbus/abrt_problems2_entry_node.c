@@ -91,7 +91,32 @@ int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, 
     return ret;
 }
 
-struct p2e_node *get_entry(GDBusConnection *connection,
+problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, uid_t caller_uid, GError **error)
+{
+    struct dump_dir *dd = NULL;
+
+    if (abrt_problems2_entry_node_accessible_by_uid(node, caller_uid, &dd) != 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
+                    "You are not authorized to access the problem");
+        return NULL;
+    }
+
+    dd = dd_fdopendir(dd, DD_OPEN_READONLY);
+    if (dd == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Cannot lock the problem. Check system logs.");
+        return NULL;
+    }
+
+    problem_data_t *pd = create_problem_data_from_dump_dir(dd);
+    dd_close(dd);
+
+    return pd;
+}
+
+static struct p2e_node *get_entry(GDBusConnection *connection,
                           const gchar *caller,
                           const gchar *object_path,
                           struct dump_dir **dd,

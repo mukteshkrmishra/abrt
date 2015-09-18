@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import re
 import dbus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
@@ -62,17 +63,26 @@ def test_fake_binary_type(tf):
 def test_real_problem(tf):
     print("TEST REAL PROBLEM")
 
-    with open("/etc/services", "r") as services_file:
-        description = {"analyzer"    : "libreport",
-                       "type"        : "libreport",
-                       "reason"      : "Application has been killed",
-                       "backtrace"   : "die()",
-                       "executable"  : "/usr/bin/foo",
-                       "services"    : dbus.types.UnixFd(services_file)}
+    # 25 * 41 = 1025
+    data = "ABRT test case huge file " * 41
+    with open("/tmp/hugetext", "w") as hugetext_file:
+        # 9000KiB > 8MiB
+        for i in range(0, 9000):
+            hugetext_file.write(data)
 
-        tf.problem_id = tf.p2.NewProblem(description)
-        if not tf.problem_id:
-            print("FAILURE : empty return value")
+    with open("/tmp/hugetext", "r") as hugetext_file:
+        with open("/usr/bin/true", "r") as bintrue_file:
+            description = {"analyzer"    : "libreport",
+                           "type"        : "libreport",
+                           "reason"      : "Application has been killed",
+                           "backtrace"   : "die()",
+                           "executable"  : "/usr/bin/foo",
+                           "hugetext"    : dbus.types.UnixFd(hugetext_file),
+                           "binary"      : dbus.types.UnixFd(bintrue_file)}
+
+            tf.problem_id = tf.p2.NewProblem(description)
+            if not tf.problem_id:
+                print("FAILURE : empty return value")
     return False
 
 def test_get_problems(tf):
@@ -84,6 +94,52 @@ def test_get_problems(tf):
     if not tf.problem_id in p:
         print("FAILURE: missing our problem")
     return False
+
+def test_get_problem_data(tf):
+    print("TEST GET PROBLEM DATA")
+
+    #tf.p2.GetProblemData(dbus.types.String())
+
+    try:
+        tf.p2.GetProblemData("/invalid/path")
+        print("FAILURE: did not detected invalid entry address")
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
+            print("FAILURE: invalid exception error")
+
+    try:
+        tf.p2.GetProblemData("/org/freedesktop/Problems2/Entry/FAKE")
+        print("FAILURE: did not detected invalid entry address")
+    except dbus.exceptions.DBusException as ex:
+        if str(ex) != "org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist":
+            print("FAILURE: invalid exception error")
+
+    p = tf.p2.GetProblemData(tf.problem_id)
+    expected = {
+        "analyzer"    : (2, len("libreport"), "libreport"),
+        "type"        : (2, len("libreport"), "libreport"),
+        "reason"      : (2, len("Application has been killed"), "Application has been killed"),
+        "backtrace"   : (2, len("die()"), "die()"),
+        "executable"  : (2, len("/usr/bin/foo"), "/usr/bin/foo"),
+        "hugetext"    : (64, os.path.getsize("/tmp/hugetext"), "/var/spool/abrt/[^/]+/hugetext"),
+        "binary"      : (1, os.path.getsize("/usr/bin/true"), "/var/spool/abrt/[^/]+/binary"),
+    }
+
+    for k, v in expected.items():
+        if not k in p:
+            print("FAILURE: missing " + k)
+            continue
+
+        g = p[k]
+        if not re.match(v[2], g[2]):
+            print("FAILURE: invalid contents of '%s'" % (k))
+
+        if g[1] != v[1]:
+            print("FAILURE: invalid length '%s' : %i" % (k, g[1]))
+
+        if (g[0] & v[0]) != v[0]:
+            print("FAILURE: invalid flags %s : %i" % (k, g[0]))
+
 
 def test_delete_problems(tf):
     print("TEST DELETE PROBLEMS")
@@ -218,6 +274,7 @@ tf = TestFrame()
 
 test_fake_binary_type(tf)
 test_real_problem(tf)
+test_get_problem_data(tf)
 test_get_problems(tf)
 test_delete_problems(tf)
 

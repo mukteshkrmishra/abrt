@@ -259,6 +259,18 @@ int abrt_problems2_service_remove_problem(GDBusConnection *connection, const cha
     return 0;
 }
 
+problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path, uid_t caller_uid, GError **error)
+{
+    struct p2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
+    if (obj == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS, "Requested Entry does not exist");
+        return NULL;
+    }
+
+    return abrt_problems2_entry_node_problem_data((struct p2e_node *)obj->node, caller_uid, error);
+}
+
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid)
 {
     GList *paths = NULL;

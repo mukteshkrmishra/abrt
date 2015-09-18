@@ -60,7 +60,7 @@ static const char *handle_new_problem(GDBusConnection *connection,
                 goto finito;
             }
 
-            ssize_t count = safe_read(handle, real_value, sizeof(real_value));
+            ssize_t count = safe_read(handle, real_value, sizeof(real_value) - 1);
             if (count <= 0)
             {
                 *error = xasprintf("Cannot read passed file descriptor: '%s' : %d", key, handle);
@@ -205,6 +205,51 @@ static void dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("GetProblemData", method_name) == 0)
     {
+        /* Parameter tuple is (0) */
+        const char *entry_path;
+
+        g_variant_get(parameters, "(&o)", &entry_path);
+
+        GError *error = NULL;
+        problem_data_t *pd = abrt_problems2_service_entry_problem_data(entry_path, caller_uid, &error);
+        if (NULL == pd)
+        {
+            g_dbus_method_invocation_return_gerror(invocation, error);
+            g_error_free(error);
+            return;
+        }
+
+        GVariantBuilder *response_builder = g_variant_builder_new(G_VARIANT_TYPE_ARRAY);
+
+        GHashTableIter pd_iter;
+        char *element_name;
+        struct problem_item *element_info;
+        g_hash_table_iter_init(&pd_iter, pd);
+        while (g_hash_table_iter_next(&pd_iter, (void**)&element_name, (void**)&element_info))
+        {
+            unsigned long size = 0;
+            if (problem_item_get_size(element_info, &size) != 0)
+            {
+                log_notice("Can't get stat of : '%s'", element_info->content);
+                continue;
+            }
+
+            log("%s: %d", element_name, element_info->flags);
+            g_variant_builder_add(response_builder, "{s(its)}",
+                                                    element_name,
+                                                    element_info->flags,
+                                                    size,
+                                                    element_info->content);
+        }
+
+        GVariant *response = g_variant_new("(a{s(its)})", response_builder);
+        g_variant_builder_unref(response_builder);
+
+        problem_data_free(pd);
+
+        g_dbus_method_invocation_return_value(invocation, response);
+        return;
+
     }
     else if (strcmp("DeleteProblems", method_name) == 0)
     {

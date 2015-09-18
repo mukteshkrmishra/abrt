@@ -28,6 +28,7 @@ struct p2e_node *abrt_problems2_entry_node_new(char *dirname);
 int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error);
 void abrt_problems2_entry_node_free(struct p2e_node *entry);
 int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t uid, struct dump_dir **dd);
+problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, uid_t caller_uid, GError **error);
 
 GDBusInterfaceVTable *abrt_problems2_entry_node_vtable(void);
 
