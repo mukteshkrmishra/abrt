@@ -137,7 +137,7 @@ static struct p2e_node *get_entry(GDBusConnection *connection,
         return NULL;
     }
 
-    if (!abrt_problems2_entry_node_accessible_by_uid(node, caller_uid, dd))
+    if (0 != abrt_problems2_entry_node_accessible_by_uid(node, caller_uid, dd))
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
                     "You are not authorized to access the problem");
@@ -209,6 +209,19 @@ static void dbus_method_call(GDBusConnection *connection,
             goto return_property_value; \
         }
 
+#define GET_INTEGER_PROPERTY(name, element, S) \
+        if (strcmp(name, property_name) == 0) \
+        { \
+            uint##S##_t tmp_value = 0; \
+            dd_load_uint##S (dd, element, &tmp_value); \
+            retval = g_variant_new_uint##S (tmp_value); \
+            goto return_property_value; \
+        }
+
+#define GET_UINT32_PROPERTY(name, element) GET_INTEGER_PROPERTY(name, element, 32)
+
+#define GET_UINT64_PROPERTY(name, element) GET_INTEGER_PROPERTY(name, element, 64)
+
 static GVariant *dbus_get_property(GDBusConnection *connection,
                         const gchar *caller,
                         const gchar *object_path,
@@ -240,35 +253,14 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
     GET_PLAIN_TEXT_PROPERTY("uuid", FILENAME_UUID)
     GET_PLAIN_TEXT_PROPERTY("duphash", FILENAME_DUPHASH)
     GET_PLAIN_TEXT_PROPERTY("reason", FILENAME_REASON)
+    GET_PLAIN_TEXT_PROPERTY("technical_details", FILENAME_NOT_REPORTABLE)
 
-    if (strcmp("uid", property_name) == 0)
-    {
-        uint32_t uid = 0;
+    GET_UINT32_PROPERTY("uid", FILENAME_UID)
+    GET_UINT32_PROPERTY("count", FILENAME_COUNT)
 
-        /* Ignore errors:
-         *  1. dd_load_uint32() prints out a good error messages
-         *  2. if an error occurs, uid will remain untouched
-         */
-        dd_load_uint32(dd, FILENAME_UID, &uid);
+    GET_UINT64_PROPERTY("first_occurrence", FILENAME_TIME)
+    GET_UINT64_PROPERTY("last_occurrence", FILENAME_LAST_OCCURRENCE)
 
-        retval = g_variant_new_uint32(uid);
-        goto return_property_value;
-    }
-
-    if (strcmp("first_occurrence", property_name) == 0)
-    {
-       return NULL;
-    }
-
-    if (strcmp("last_occurrence", property_name) == 0)
-    {
-       return NULL;
-    }
-
-    if (strcmp("count", property_name) == 0)
-    {
-       return NULL;
-    }
 
     if (strcmp("package", property_name) == 0)
     {
@@ -281,11 +273,6 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
     }
 
     if (strcmp("solutions", property_name) == 0)
-    {
-       return NULL;
-    }
-
-    if (strcmp("technical_details", property_name) == 0)
     {
        return NULL;
     }

@@ -4,6 +4,9 @@ import sys
 import time
 import re
 import dbus
+import pwd
+import time
+import socket
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
@@ -71,7 +74,8 @@ def test_fake_binary_type(tf):
         type_file.write("CCpp")
 
     with open("/tmp/fake_type", "r") as type_file:
-        description = {"analyzer"    : "libreport",
+        description = {"analyzer"    : "problems2testsuite_analyzer",
+                       "type"        : "problems2testsuite_type",
                        "reason"      : "Application has been killed",
                        "backtrace"   : "die()",
                        "executable"  : "/usr/bin/foo",
@@ -93,14 +97,19 @@ def test_real_problem(tf):
 
     with open("/tmp/hugetext", "r") as hugetext_file:
         with open("/usr/bin/true", "r") as bintrue_file:
-            description = {"analyzer"    : "libreport",
-                           "type"        : "libreport",
+            description = {"analyzer"    : "problems2testsuite_analyzer",
+                           "type"        : "problems2testsuite_type",
                            "reason"      : "Application has been killed",
                            "backtrace"   : "die()",
                            "executable"  : "/usr/bin/foo",
+                           "uuid"        : "0123456789ABCDEF",
+                           "duphash"     : "FEDCBA9876543210",
+                           "cmdline"     : "/usr/bin/foo --blah",
+                           "component"   : "abrt",
                            "hugetext"    : dbus.types.UnixFd(hugetext_file),
                            "binary"      : dbus.types.UnixFd(bintrue_file)}
 
+            tf.problem_first_occurrence = time.time()
             tf.problem_id = tf.p2.NewProblem(description)
             if not tf.problem_id:
                 print("FAILURE : empty return value")
@@ -148,8 +157,8 @@ def test_get_problem_data(tf):
 
     p = tf.p2.GetProblemData(tf.problem_id)
     expected = {
-        "analyzer"    : (2, len("libreport"), "libreport"),
-        "type"        : (2, len("libreport"), "libreport"),
+        "analyzer"    : (2, len("problems2testsuite_analyzer"), "problems2testsuite_analyzer"),
+        "type"        : (2, len("problems2testsuite_type"), "problems2testsuite_type"),
         "reason"      : (2, len("Application has been killed"), "Application has been killed"),
         "backtrace"   : (2, len("die()"), "die()"),
         "executable"  : (2, len("/usr/bin/foo"), "/usr/bin/foo"),
@@ -215,8 +224,8 @@ def test_private_problem_not_accessible(tf):
 def test_delete_problems(tf):
     print("TEST DELETE PROBLEMS")
 
-    description = {"analyzer"    : "libreport",
-                   "type"        : "libreport",
+    description = {"analyzer"    : "problems2testsuite_analyzer",
+                   "type"        : "problems2testsuite_type",
                    "reason"      : "Application has been killed",
                    "backtrace"   : "die()",
                    "executable"  : "/usr/bin/sh",
@@ -326,13 +335,75 @@ def test_close_signal(tf):
 
 def create_problem(p2):
     with open("/usr/bin/true", "r") as bintrue_file:
-        description = {"analyzer"    : "libreport",
-                       "type"        : "libreport",
+        description = {"analyzer"    : "problems2testsuite_analyzer",
+                       "type"        : "problems2testsuite_type",
                        "reason"      : "Application has been killed",
                        "backtrace"   : "die()",
                        "executable"  : "/usr/bin/foo",}
 
         return p2.NewProblem(description)
+
+
+def test_problem_entry_properties(tf):
+
+    class Problems2Entry(object):
+
+        def __init__(self, bus, entry_path):
+            entry_proxy = bus.get_object(BUS_NAME, entry_path)
+            self._properties = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.DBus.Properties")
+
+        def __getattribute__(self, name):
+            properties = object.__getattribute__(self, "_properties")
+            return properties.Get("org.freedesktop.Problems2.Entry", name)
+
+    print("TEST ELEMENTARY ENTRY PROPERTIES")
+
+    p2e = Problems2Entry(tf.bus, tf.problem_id)
+
+    if not re.match("/var/spool/abrt/problems2testsuite_type[^/]*", p2e.id):
+        print("FAILURE: strange problem ID")
+
+    if p2e.user != pwd.getpwuid(os.geteuid()).pw_name:
+        print("FAILURE: strange username")
+
+    if p2e.hostname != socket.gethostname():
+        print("FAILURE: invalid hostname")
+
+    if p2e.type != "problems2testsuite_type":
+        print("FAILURE: invalid type")
+
+    if p2e.executable != "/usr/bin/foo":
+        print("FAILURE: invalid executable")
+
+    if p2e.command_line_arguments != "/usr/bin/foo --blah":
+        print("FAILURE: invalid command_line_arguments")
+
+    if p2e.component != "abrt":
+        print("FAILURE: invalid component")
+
+    if p2e.duphash != "FEDCBA9876543210":
+        print("FAILURE: invalid duphash")
+
+    if p2e.uuid != "0123456789ABCDEF":
+        print("FAILURE: invalid uuid")
+
+    if p2e.reason != "Application has been killed":
+        print("FAILURE: invalid reason")
+
+    if p2e.uid != os.geteuid():
+        print("FAILURE: strange uid")
+
+    if p2e.count != 1:
+        print("FAILURE: count is not 1")
+
+    if abs(p2e.first_occurrence - tf.problem_first_occurrence) >= 5:
+        print("FAILURE: too old first occurrence")
+
+    if p2e.first_occurrence != p2e.last_occurrence:
+        print("FAILURE: first_occurrence and last_occurrence differ")
+
+    if abs(p2e.last_occurrence - tf.problem_first_occurrence) >= 5:
+        print("FAILURE: too old last occurrence")
 
 
 if __name__ == "__main__":
@@ -377,3 +448,4 @@ if __name__ == "__main__":
 
     test_close_signal(tf)
     test_private_problem_not_accessible(tf)
+    test_problem_entry_properties(tf)
