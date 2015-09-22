@@ -261,7 +261,6 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
     GET_UINT64_PROPERTY("first_occurrence", FILENAME_TIME)
     GET_UINT64_PROPERTY("last_occurrence", FILENAME_LAST_OCCURRENCE)
 
-
     if (strcmp("package", property_name) == 0)
     {
         const char *const elements[] = { FILENAME_PACKAGE, FILENAME_PKG_EPOCH, FILENAME_PKG_NAME,  FILENAME_PKG_VERSION, FILENAME_PKG_RELEASE };
@@ -285,11 +284,6 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
     }
 
     if (strcmp("solutions", property_name) == 0)
-    {
-       return NULL;
-    }
-
-    if (strcmp("desktop_file", property_name) == 0)
     {
        return NULL;
     }
@@ -322,7 +316,7 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     if (strcmp("can_be_reported", property_name) == 0)
     {
-       retval = g_variant_new_boolean(!dd_exist(dd, FILENAME_REPORTED_TO));
+       retval = g_variant_new_boolean(!dd_exist(dd, FILENAME_NOT_REPORTABLE));
        goto return_property_value;
     }
 
@@ -447,11 +441,6 @@ static gboolean dbus_set_property(GDBusConnection *connection,
     }
 
     if (strcmp("technical_details", property_name) == 0)
-    {
-        return FALSE;
-    }
-
-    if (strcmp("desktop_file", property_name) == 0)
     {
         return FALSE;
     }

@@ -532,9 +532,18 @@ a paragraph of human readable text, so it could hold a structured text.
                 <tp:docstring>Technical details about the problem usually containing explanation for the not-reporatiblity of the problem (e.g tainted Kernel oopses).</tp:docstring>
             </property>
 
+<!--
+Jakub Filak <jfilak@redhat.com>:
+
+Finding out the relevant desktop file depends also on files from $HOME, so the
+value of this property might be misleading. The lookup algorithm tries really
+hard to find the matching desktop file and often returns the best match not the
+real value.
+
             <property name='desktop_file' type='s' access='read'>
                 <tp:docstring>The name of system desktop file used to start the program. This property is set to some value only if the program was started as an application, the application was found and the program is shipped with a system package (i.e. this property is empty for crashes of user application).</tp:docstring>
             </property>
+-->
 
             <property name='elements' type='as' access='read'>
                 <tp:docstring>List of all elements the problem data contains.</tp:docstring>
