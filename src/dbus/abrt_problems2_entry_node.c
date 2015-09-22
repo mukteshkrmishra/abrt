@@ -280,7 +280,46 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     if (strcmp("reports", property_name) == 0)
     {
-       return NULL;
+        GVariantBuilder top_builder;
+        g_variant_builder_init(&top_builder, G_VARIANT_TYPE("a(sa{sv})"));
+
+        GList *reports = read_entire_reported_to(dd);
+        for (GList *iter = reports; iter != NULL; iter = g_list_next(iter))
+        {
+            GVariantBuilder value_builder;
+            g_variant_builder_init(&value_builder, G_VARIANT_TYPE("a{sv}"));
+
+            struct report_result *r = (struct report_result *)iter->data;
+
+            if (r->url != NULL)
+            {
+                GVariant *data = g_variant_new_variant(g_variant_new_string(r->url));
+                g_variant_builder_add(&value_builder, "{sv}", "URL", data);
+            }
+            if (r->msg != NULL)
+            {
+                GVariant *data = g_variant_new_variant(g_variant_new_string(r->msg));
+                g_variant_builder_add(&value_builder, "{sv}", "MSG", data);
+            }
+            if (r->bthash != NULL)
+            {
+                GVariant *data = g_variant_new_variant(g_variant_new_string(r->bthash));
+                g_variant_builder_add(&value_builder, "{sv}", "BTHASH", data);
+            }
+
+            GVariant *children[2];
+            children[0] = g_variant_new_string(r->label);
+            children[1] = g_variant_builder_end(&value_builder);
+            GVariant *entry = g_variant_new_tuple(children, 2);
+
+            g_variant_builder_add_value(&top_builder, entry);
+        }
+
+        g_list_free_full(reports, (GDestroyNotify)free_report_result);
+
+        retval = g_variant_builder_end(&top_builder);
+
+        goto return_property_value;
     }
 
     if (strcmp("solutions", property_name) == 0)

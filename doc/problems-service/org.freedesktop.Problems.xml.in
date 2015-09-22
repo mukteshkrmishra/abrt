@@ -349,8 +349,10 @@ for path in prblms:
 Property "reports":
 ===================
 libreports 'repoted_to' contains known reports of a problem. Every report is
-stored in a form of a single line. Every 'reported_to' line is prefixed with
-"label" followed ":". We will use term 'title' instead of 'label.
+stored in the form of a single line. Every 'reported_to' line is prefixed with
+"label" followed ":" and a single label can be used on more lines.
+We will use term 'title' instead of 'label.
+
 libreport recognizes three value types on lines of 'reported_to' element:
 1. text message
 2. URL (Bugzilla, e-mail, upload, RHSupport)
@@ -411,7 +413,7 @@ the need to touch raw data.
 ====
 SetSemanticElement() provides the way to modify 'reports' property.
 -->
-            <property name='reports' type='a{sa{sv}}' access='read'>
+            <property name='reports' type='a(sa{sv})' access='read'>
                 <tp:docstring>The list of reports of the problem in the form of a dictionary where the key is the report type (e.g. Bugzilla, ABRT Server) and the value is another dictionary with the report information ("URL", "https://bugzilla.redhat.com/1000000"). Known information types are the following:
                     <variablelist>
                         <varlistentry>

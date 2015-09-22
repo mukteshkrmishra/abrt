@@ -110,6 +110,7 @@ def test_real_problem(tf):
                            "pkg_release" : "3",
                            "cmdline"     : "/usr/bin/foo --blah",
                            "component"   : "abrt",
+                           "reported_to" : "ABRT Server: BTHASH=0123456789ABCDEF MSG=test\nServer: URL=http://example.org\nServer: URL=http://case.org\n",
                            "hugetext"    : dbus.types.UnixFd(hugetext_file),
                            "binary"      : dbus.types.UnixFd(bintrue_file)}
 
@@ -409,8 +410,8 @@ def test_problem_entry_properties(tf):
     if abs(p2e.last_occurrence - tf.problem_first_occurrence) >= 5:
         print("FAILURE: too old last occurrence")
 
-    if p2e.is_reported:
-        print("FAILURE: 'is_reported' but should not be reported")
+    if not p2e.is_reported:
+        print("FAILURE: 'is_reported' == FALSE but should be reported")
 
     if not p2e.can_be_reported:
         print("FAILURE: 'cannot be reported' but should be report-able")
@@ -435,6 +436,23 @@ def test_problem_entry_properties(tf):
 
         if not e in elements:
             print("FAILURE: missing element %s" % (e))
+
+    reports = p2e.reports
+    if len(reports) != 3:
+        print("FAILURE: missing some reports")
+
+    exp = [
+        ("ABRT Server", { "BTHASH" : "0123456789ABCDEF", "MSG" : "test"}),
+        ("Server", { "URL" : "http://example.org"}),
+        ("Server", { "URL" : "http://case.org"}),
+        ]
+
+    for i in range(0, len(e) - 1):
+        if exp[i][0] != reports[i][0]:
+            print("FAILURE: invalid label %d, %s" % (i, reports[i][0]))
+
+        if exp[i][1] != reports[i][1]:
+            print("FAILURE: invalid value %d, %s" % (i, str(reports[i][1])))
 
 
 if __name__ == "__main__":
