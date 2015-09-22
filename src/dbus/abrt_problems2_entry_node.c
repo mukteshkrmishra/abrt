@@ -264,7 +264,19 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     if (strcmp("package", property_name) == 0)
     {
-       return NULL;
+        const char *const elements[] = { FILENAME_PACKAGE, FILENAME_PKG_EPOCH, FILENAME_PKG_NAME,  FILENAME_PKG_VERSION, FILENAME_PKG_RELEASE };
+
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("(sssss)"));
+        for (size_t i = 0; i < ARRAY_SIZE(elements); ++i)
+        {
+            char *data = dd_load_text(dd, elements[i]);
+            g_variant_builder_add(&builder, "s", data);
+            free(data);
+        }
+
+        retval = g_variant_builder_end(&builder);
+        goto return_property_value;
     }
 
     if (strcmp("reports", property_name) == 0)
@@ -284,7 +296,17 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     if (strcmp("elements", property_name) == 0)
     {
-       return NULL;
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("as"));
+        dd_init_next_file(dd);
+        char *short_name;
+        while (dd_get_next_file(dd, &short_name, NULL))
+        {
+            g_variant_builder_add(&builder, "s", short_name);
+            free(short_name);
+        }
+        retval = g_variant_builder_end(&builder);
+        goto return_property_value;
     }
 
     if (strcmp("semantic_elements", property_name) == 0)
@@ -294,17 +316,20 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     if (strcmp("is_reported", property_name) == 0)
     {
-       return NULL;
+       retval = g_variant_new_boolean(dd_exist(dd, FILENAME_REPORTED_TO));
+       goto return_property_value;
     }
 
     if (strcmp("can_be_reported", property_name) == 0)
     {
-       return NULL;
+       retval = g_variant_new_boolean(!dd_exist(dd, FILENAME_REPORTED_TO));
+       goto return_property_value;
     }
 
     if (strcmp("is_remote", property_name) == 0)
     {
-       return NULL;
+       retval = g_variant_new_boolean(dd_exist(dd, FILENAME_REMOTE));
+       goto return_property_value;
     }
 
     dd_close(dd);

@@ -104,6 +104,10 @@ def test_real_problem(tf):
                            "executable"  : "/usr/bin/foo",
                            "uuid"        : "0123456789ABCDEF",
                            "duphash"     : "FEDCBA9876543210",
+                           "package"     : "problems2-1.2-3",
+                           "pkg_name"    : "problems2",
+                           "pkg_version" : "1.2",
+                           "pkg_release" : "3",
                            "cmdline"     : "/usr/bin/foo --blah",
                            "component"   : "abrt",
                            "hugetext"    : dbus.types.UnixFd(hugetext_file),
@@ -404,6 +408,33 @@ def test_problem_entry_properties(tf):
 
     if abs(p2e.last_occurrence - tf.problem_first_occurrence) >= 5:
         print("FAILURE: too old last occurrence")
+
+    if p2e.is_reported:
+        print("FAILURE: 'is_reported' but should not be reported")
+
+    if not p2e.can_be_reported:
+        print("FAILURE: 'cannot be reported' but should be report-able")
+
+    if p2e.is_remote:
+        print("FAILURE: 'is_remote' but should not be remote")
+
+    package = p2e.package
+    if len(package) != 5:
+        print("FAILURE: insufficient number of package members")
+
+    if package != ("problems2-1.2-3", "", "problems2", "1.2", "3"):
+        print("FAILURE: invalid package struct %s" % (str(package)))
+
+    elements = p2e.elements
+    if len(elements) == 0:
+        print("FAILURE: insufficient number of elements")
+
+    for e in ["analyzer", "type", "reason", "backtrace", "executable", "uuid",
+              "duphash", "package", "pkg_name", "pkg_version", "pkg_release",
+              "cmdline", "component", "hugetext", "binary", "count", "time"]:
+
+        if not e in elements:
+            print("FAILURE: missing element %s" % (e))
 
 
 if __name__ == "__main__":
