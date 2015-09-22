@@ -19,6 +19,7 @@
 #include "libabrt.h"
 #include "abrt_problems2_entry_node.h"
 #include "abrt_problems2_service.h"
+#include <gio/gunixfdlist.h>
 
 struct p2e_node
 {
@@ -147,6 +148,90 @@ static struct p2e_node *get_entry(GDBusConnection *connection,
     return node;
 }
 
+static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
+                                     GVariant *elements, GUnixFDList *fd_list)
+{
+    GVariantBuilder builder;
+    g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
+
+    GVariantIter iter;
+    GVariant *item;
+    g_variant_iter_init(&iter, elements);
+    while ((item = g_variant_iter_next_value(&iter)))
+    {
+        const char *name = g_variant_get_string(item, /*length*/NULL);
+        log_debug("Reading element: %s", name);
+
+        if (!str_is_correct_filename(name))
+        {
+            error_msg("Attempt to read prohibited data: '%s'", name);
+            goto next_element;
+        }
+
+        if (!dd_exist(dd, name))
+        {
+            log_debug("Element does not exist: %s", name);
+            goto next_element;
+        }
+
+        int elem_type = 0;
+        char *data = NULL;
+        int fd = -1;
+        int r = problem_data_load_dump_dir_element(dd, name, &data, &elem_type, &fd);
+        if (r < 0)
+        {
+            error_msg("Failed to open %s: %s", name, strerror(-r));
+            goto next_element;
+        }
+
+        if (   ((flags & 0x04) && !(elem_type & CD_FLAG_TXT))
+            || ((flags & 0x08) && !(elem_type & CD_FLAG_BIGTXT))
+            || ((flags & 0x10) && !(elem_type & CD_FLAG_BIN))
+           )
+        {
+            log_debug("Element is not of the requested type: %s", name);
+            free(data);
+            close(fd);
+            goto next_element;
+        }
+
+        if (   (flags & 0x1)
+            || (elem_type & CD_FLAG_BIGTXT)
+            || (elem_type & CD_FLAG_BIN))
+        {
+            free(data);
+            lseek(fd, 0, SEEK_SET);
+
+            GError *error = NULL;
+            gint pos = g_unix_fd_list_append(fd_list, fd, &error);
+            if (error != NULL)
+            {
+                error_msg("Failed to add file descriptor of %s: %s", name, error->message);
+                g_error_free(error);
+                close(fd);
+                goto next_element;
+            }
+
+            log_debug("Adding new Unix FD at position: %d",  pos);
+            g_variant_builder_add(&builder, "{sv}", name, g_variant_new("h", pos));
+            goto next_element;
+        }
+
+        log_debug("Adding element data");
+        g_variant_builder_add(&builder, "{sv}", name, g_variant_new_string(data));
+        free(data);
+        close(fd);
+
+next_element:
+        g_variant_unref(item);
+    }
+
+    log_debug("Going to reply with GUnixFDList");
+    GVariant *retval_body[1];
+    retval_body[0] = g_variant_builder_end(&builder);
+    return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
+}
+
 /* D-Bus method handler
  */
 static void dbus_method_call(GDBusConnection *connection,
@@ -170,27 +255,51 @@ static void dbus_method_call(GDBusConnection *connection,
         return;
     }
 
-    if (strcmp(method_name, "GetSemanticElement") == 0);
+    if (strcmp(method_name, "GetSemanticElement") == 0)
     {
         return;
     }
 
-    if (strcmp(method_name, "SetSemanticElement") == 0);
+    if (strcmp(method_name, "SetSemanticElement") == 0)
     {
         return;
     }
 
-    if (strcmp(method_name, "ReadElements") == 0);
+    if (strcmp(method_name, "ReadElements") == 0)
     {
+        GVariant *elements = g_variant_get_child_value(parameters, 0);
+
+        gint flags;
+        g_variant_get_child(parameters, 1, "i", &flags);
+
+        GUnixFDList *fd_list = g_unix_fd_list_new();
+
+        GVariant *retval = handle_ReadElements(dd, flags, elements, fd_list);
+        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
+
+        g_variant_unref(elements);
+        g_object_unref(fd_list);
         return;
     }
 
-    if (strcmp(method_name, "SaveElements") == 0);
+    if (strcmp(method_name, "SaveElements") == 0)
     {
+        GVariant *elements = g_variant_get_child_value(parameters, 0);
+        GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
+        GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
+
+        gint flags;
+        g_variant_get_child(parameters, 1, "i", &flags);
+
+        GVariant *retval = handle_SaveElements(dd, flags, elements, fd_list);
+        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
+
+        g_variant_unref(elements);
+        g_object_unref(fd_list);
         return;
     }
 
-    if (strcmp(method_name, "DeleteElements") == 0);
+    if (strcmp(method_name, "DeleteElements") == 0)
     {
         return;
     }

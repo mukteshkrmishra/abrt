@@ -349,84 +349,92 @@ def create_problem(p2):
         return p2.NewProblem(description)
 
 
+class Problems2Entry(object):
+
+    def __init__(self, bus, entry_path):
+        entry_proxy = bus.get_object(BUS_NAME, entry_path)
+        self._properties = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.DBus.Properties")
+        self._entry = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.Problems2.Entry")
+
+    def __getattribute__(self, name):
+        try:
+            return object.__getattribute__(self, name)
+        except AttributeError as ex:
+            entry = object.__getattribute__(self, "_entry")
+            return entry.get_dbus_method(name)
+
+    def getproperty(self, name):
+        properties = object.__getattribute__(self, "_properties")
+        return properties.Get("org.freedesktop.Problems2.Entry", name)
+
+
 def test_problem_entry_properties(tf):
-
-    class Problems2Entry(object):
-
-        def __init__(self, bus, entry_path):
-            entry_proxy = bus.get_object(BUS_NAME, entry_path)
-            self._properties = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.DBus.Properties")
-
-        def __getattribute__(self, name):
-            properties = object.__getattribute__(self, "_properties")
-            return properties.Get("org.freedesktop.Problems2.Entry", name)
-
     print("TEST ELEMENTARY ENTRY PROPERTIES")
 
     p2e = Problems2Entry(tf.bus, tf.problem_id)
 
-    if not re.match("/var/spool/abrt/problems2testsuite_type[^/]*", p2e.id):
+    if not re.match("/var/spool/abrt/problems2testsuite_type[^/]*", p2e.getproperty("id")):
         print("FAILURE: strange problem ID")
 
-    if p2e.user != pwd.getpwuid(os.geteuid()).pw_name:
+    if p2e.getproperty("user") != pwd.getpwuid(os.geteuid()).pw_name:
         print("FAILURE: strange username")
 
-    if p2e.hostname != socket.gethostname():
+    if p2e.getproperty("hostname") != socket.gethostname():
         print("FAILURE: invalid hostname")
 
-    if p2e.type != "problems2testsuite_type":
+    if p2e.getproperty("type") != "problems2testsuite_type":
         print("FAILURE: invalid type")
 
-    if p2e.executable != "/usr/bin/foo":
+    if p2e.getproperty("executable") != "/usr/bin/foo":
         print("FAILURE: invalid executable")
 
-    if p2e.command_line_arguments != "/usr/bin/foo --blah":
+    if p2e.getproperty("command_line_arguments") != "/usr/bin/foo --blah":
         print("FAILURE: invalid command_line_arguments")
 
-    if p2e.component != "abrt":
+    if p2e.getproperty("component") != "abrt":
         print("FAILURE: invalid component")
 
-    if p2e.duphash != "FEDCBA9876543210":
+    if p2e.getproperty("duphash") != "FEDCBA9876543210":
         print("FAILURE: invalid duphash")
 
-    if p2e.uuid != "0123456789ABCDEF":
+    if p2e.getproperty("uuid") != "0123456789ABCDEF":
         print("FAILURE: invalid uuid")
 
-    if p2e.reason != "Application has been killed":
+    if p2e.getproperty("reason") != "Application has been killed":
         print("FAILURE: invalid reason")
 
-    if p2e.uid != os.geteuid():
+    if p2e.getproperty("uid") != os.geteuid():
         print("FAILURE: strange uid")
 
-    if p2e.count != 1:
+    if p2e.getproperty("count") != 1:
         print("FAILURE: count is not 1")
 
-    if abs(p2e.first_occurrence - tf.problem_first_occurrence) >= 5:
+    if abs(p2e.getproperty("first_occurrence") - tf.problem_first_occurrence) >= 5:
         print("FAILURE: too old first occurrence")
 
-    if p2e.first_occurrence != p2e.last_occurrence:
+    if p2e.getproperty("first_occurrence") != p2e.getproperty("last_occurrence"):
         print("FAILURE: first_occurrence and last_occurrence differ")
 
-    if abs(p2e.last_occurrence - tf.problem_first_occurrence) >= 5:
+    if abs(p2e.getproperty("last_occurrence") - tf.problem_first_occurrence) >= 5:
         print("FAILURE: too old last occurrence")
 
-    if not p2e.is_reported:
+    if not p2e.getproperty("is_reported"):
         print("FAILURE: 'is_reported' == FALSE but should be reported")
 
-    if not p2e.can_be_reported:
+    if not p2e.getproperty("can_be_reported"):
         print("FAILURE: 'cannot be reported' but should be report-able")
 
-    if p2e.is_remote:
+    if p2e.getproperty("is_remote"):
         print("FAILURE: 'is_remote' but should not be remote")
 
-    package = p2e.package
+    package = p2e.getproperty("package")
     if len(package) != 5:
         print("FAILURE: insufficient number of package members")
 
     if package != ("problems2-1.2-3", "", "problems2", "1.2", "3"):
         print("FAILURE: invalid package struct %s" % (str(package)))
 
-    elements = p2e.elements
+    elements = p2e.getproperty("elements")
     if len(elements) == 0:
         print("FAILURE: insufficient number of elements")
 
@@ -437,7 +445,7 @@ def test_problem_entry_properties(tf):
         if not e in elements:
             print("FAILURE: missing element %s" % (e))
 
-    reports = p2e.reports
+    reports = p2e.getproperty("reports")
     if len(reports) != 3:
         print("FAILURE: missing some reports")
 
@@ -453,6 +461,63 @@ def test_problem_entry_properties(tf):
 
         if exp[i][1] != reports[i][1]:
             print("FAILURE: invalid value %d, %s" % (i, str(reports[i][1])))
+
+
+def test_read_elements(tf):
+    print("TEST READ ELEMENTS")
+
+    requested = { "reason" : dbus.types.String,
+                  "hugetext" : dbus.types.UnixFd,
+                  "binary" : dbus.types.UnixFd }
+
+    p2e = Problems2Entry(tf.bus, tf.problem_id)
+    elements = p2e.ReadElements(requested.keys(), 0)
+
+    for r, t in requested.items():
+        if not r in elements:
+            print("FAILURE: response is missing %s" % (r))
+            continue
+
+        if type(elements[r]) != t:
+            print("FAILURE: invalid type of %s: %s" % (r, str(type(elements[r]))))
+
+    resp = p2e.ReadElements([], 0x0)
+    if len(resp) != 0:
+        print("FAILURE: the response for an empty request is not empty")
+
+    resp = p2e.ReadElements(["foo"], 0x0)
+    if len(resp) != 0:
+        print("FAILURE: the response for an request with non-existing element is not empty")
+
+    resp = p2e.ReadElements(["/etc/shadow", "../../../../etc/shadow"], 0x0)
+    if len(resp) != 0:
+        print("FAILURE: the response for an request with prohibited elements is not empty")
+
+    reasonlist = p2e.ReadElements(["reason"], 0x08)
+    if reasonlist:
+        print("FAILURE: returned text when ONLY_BIG_TEXT requested")
+
+    reasonlist = p2e.ReadElements(["reason"], 0x10)
+    if reasonlist:
+        print("FAILURE: returned text when ONLY_BIN requested")
+
+    reasonlist = p2e.ReadElements(["reason"], 0x04)
+    if len(reasonlist) != 1:
+        print("FAILURE: not returned text when ONLY_TEXT requested")
+
+    if reasonlist["reason"] != "Application has been killed":
+        print("FAILURE: invalid data returned")
+
+    reasonlist = p2e.ReadElements(["reason"], 0x01 | 0x04)
+    if len(reasonlist) != 1:
+        print("FAILURE: not returned fd when ALL_FD | ONLY_TEXT requested")
+
+    fd = reasonlist["reason"].take()
+    data = os.read(fd, len("Application has been killed"))
+    if "Application has been killed" != data.decode():
+        print("FAILURE: invalid data read from file descriptor : '%s'" % (data))
+    os.close(fd)
+
 
 
 if __name__ == "__main__":
@@ -498,3 +563,5 @@ if __name__ == "__main__":
     test_close_signal(tf)
     test_private_problem_not_accessible(tf)
     test_problem_entry_properties(tf)
+    test_read_elements(tf)
+
