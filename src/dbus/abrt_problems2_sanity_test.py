@@ -73,7 +73,7 @@ def dictionary_key_has_value(dictionary, key, expected):
     if not key in dictionary:
         print("FAILURE: missing '%s'" % (key))
     elif dictionary[key] != expected:
-        print("FAILURE: key '%s', expected: '%s', is:'%s'", key, expected, resp[key])
+        print("FAILURE: key '%s', expected: '%s', is:'%s'", key, expected, dictionary[key])
 
 
 def test_fake_binary_type(tf):
@@ -533,6 +533,8 @@ def test_read_elements(tf):
 def test_save_elements(tf):
     print("TEST SAVE ELEMENTS")
 
+    p2e = Problems2Entry(tf.bus, tf.problem_id)
+
     shorttext = "line one\nline two\nline three\n"
     with open("/tmp/shorttext", "w") as shorttext_file:
         shorttext_file.write(shorttext)
@@ -541,8 +543,11 @@ def test_save_elements(tf):
         request = { "random" : "random text",
                     "shorttext" : dbus.types.UnixFd(fstab_file) }
 
-        p2e = Problems2Entry(tf.bus, tf.problem_id)
         dummy = p2e.SaveElements(request, 0)
+
+    elements = p2e.getproperty("elements")
+    if not "random" in elements or not "shorttext" in elements:
+        print("FAILURE: property 'elements' does not include the created elements")
 
     resp = p2e.ReadElements(["random", "shorttext"], 0x00)
     if len(resp) != 2:
@@ -550,6 +555,74 @@ def test_save_elements(tf):
 
     dictionary_key_has_value(resp, "random", "random text")
     dictionary_key_has_value(resp, "shorttext", shorttext)
+
+    resp = p2e.SaveElements(dict(), 0x0)
+
+    for path in ["/tmp/shadow", "/tmp/passwd"]:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+    resp = p2e.SaveElements({"/tmp/shadow" : "blah", "../../../../tmp/passwd" : "bar"}, 0x0)
+
+    try:
+        os.unlink("/tmp/shadow")
+        print("FAILURE: accepted an absolute path")
+    except OSError:
+        pass
+
+    try:
+        os.unlink("/tmp/passwd")
+        print("FAILURE: accepted a relative path")
+    except OSError:
+        pass
+
+
+def test_delete_elements(tf):
+    print("TEST DELETE ELEMENTS")
+
+    p2e = Problems2Entry(tf.bus, tf.problem_id)
+
+    deleted_elements = { "delete_one" : "delete one",
+                         "delete_two" : "delete two",
+                         "delete_six" : "delete six" }
+
+    p2e.SaveElements(deleted_elements, 0x0)
+    elements = p2e.getproperty("elements")
+    for e in deleted_elements.keys():
+        if not e in elements:
+            print("FAILURE: element does not exist: %s" % (e))
+
+    p2e.DeleteElements(["delete_one"])
+    elements = p2e.getproperty("elements")
+    if "delete_one" in elements:
+        print("FAILURE: 'delete_one' has not been removed")
+    if not "delete_two" in elements or not "delete_six" in elements:
+        print("FAILURE: the other elements have disappeared")
+
+    p2e.DeleteElements(["delete_one", "delete_two", "delete_six"])
+    elements = p2e.getproperty("elements")
+    if "delete_two" in elements or "delete_six" in elements:
+        print("FAILURE: the other elements have not been removed")
+
+    p2e.DeleteElements([])
+
+    for path in ["/tmp/shadow", "/tmp/passwd"]:
+        with open(path, "w") as tmp_file:
+            tmp_file.write("should not be touched")
+
+    resp = p2e.DeleteElements(["/tmp/shadow", "../../../../tmp/passwd"])
+
+    try:
+        os.unlink("/tmp/shadow")
+    except OSError as ex:
+        print ("FAILURE: removed an absolute path: %s" % (str(ex)))
+
+    try:
+        os.unlink("/tmp/passwd")
+    except OSError as ex:
+        print ("FAILURE: removed a relative path: %s" % (str(ex)))
 
 
 if __name__ == "__main__":
@@ -597,4 +670,4 @@ if __name__ == "__main__":
     test_problem_entry_properties(tf)
     test_read_elements(tf)
     test_save_elements(tf)
-
+    test_delete_elements(tf)

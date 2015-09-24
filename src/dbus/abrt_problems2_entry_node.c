@@ -64,7 +64,7 @@ int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t ui
     return ret;
 }
 
-int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error)
+int abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error)
 {
     struct dump_dir *dd = NULL;
     int ret = abrt_problems2_entry_node_accessible_by_uid(entry, caller_uid, &dd);
@@ -271,6 +271,22 @@ static void handle_SaveElements(struct dump_dir *dd, gint flags,
 
 static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
 {
+    gchar *name = NULL;
+    GVariantIter iter;
+    g_variant_iter_init(&iter, elements);
+
+    /* No need to free 'name' unless breaking out of the loop */
+    while (g_variant_iter_loop(&iter, "s", &name))
+    {
+        log_debug("Deleting element: %s", name);
+        if (!str_is_correct_filename(name))
+        {
+            error_msg("Attempt to remove prohibited data: '%s'", name);
+            continue;
+        }
+
+        dd_delete_item(dd, name);
+    }
 }
 
 /* D-Bus method handler
@@ -363,9 +379,26 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp(method_name, "DeleteElements") == 0)
     {
+        dd = dd_fdopendir(dd, DD_DONT_WAIT_FOR_LOCK);
+        if (dd == NULL)
+        {
+            g_dbus_method_invocation_return_error(invocation,
+                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to obtain the lock");
+            return;
+        }
+
+        GVariant *elements = g_variant_get_child_value(parameters, 0);
+
+        handle_DeleteElements(dd, elements);
+        g_dbus_method_invocation_return_value(invocation, NULL);
+
+        g_variant_unref(elements);
+        dd_close(dd);
         return;
     }
 
+    dd_close(dd);
     error_msg("BUG: org.freedesktop.Problems2.Entry does not have method: %s", method_name);
     g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
             "The method has to be implemented");
