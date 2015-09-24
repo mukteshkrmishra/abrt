@@ -8,21 +8,21 @@
 
 #define STRINGIZE(literal) #literal
 
-static const char *handle_new_problem(GDBusConnection *connection,
-                                      GVariant *problem_info,
-                                      uid_t caller_uid,
-                                      GUnixFDList *fd_list,
-                                      char **error)
+static const char *handle_NewProblem(GDBusConnection *connection,
+                                     GVariant *problem_info,
+                                     uid_t caller_uid,
+                                     GUnixFDList *fd_list,
+                                     GError **error)
 {
     char *problem_id = NULL;
     const char *new_path = NULL;
     problem_data_t *pd = problem_data_new();
 
-    GVariantIter *iter;
-    g_variant_get(problem_info, "a{sv}", &iter);
     gchar *key;
     GVariant *value;
-    while (g_variant_iter_loop(iter, "{sv}", &key, &value))
+    GVariantIter iter;
+    g_variant_iter_init(&iter, problem_info);
+    while (g_variant_iter_loop(&iter, "{sv}", &key, &value))
     {
         if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
         {
@@ -30,8 +30,10 @@ static const char *handle_new_problem(GDBusConnection *connection,
             const char *real_value = g_variant_get_string(value, /*ignore length*/NULL);
             if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
             {
-                *error = xasprintf("You are not allowed to create element '%s' containing '%s'", key, real_value);
-                goto finito;
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "You are not allowed to create element '%s' containing '%s'",
+                            key, real_value);
+                goto exit_loop_on_error;
             }
 
             problem_data_add_text_editable(pd, key, real_value);
@@ -44,48 +46,42 @@ static const char *handle_new_problem(GDBusConnection *connection,
              *
              * Get the first line and validate it. The firs line is enough.
              */
-            char real_value[256] =  { 0 };
-            GError *gerr = NULL;
-            gint handle = g_unix_fd_list_get(fd_list, g_variant_get_handle(value), &gerr);
-            if (gerr != NULL)
-            {
-                *error = xasprintf("Error in getting file descriptor '%s' : %s", key, gerr->message);
-                g_error_free(gerr);
-                goto finito;
-            }
-
+            char real_value[256] = { 0 };
+            gint handle = g_unix_fd_list_get(fd_list, g_variant_get_handle(value), error);
             if (handle < 0)
-            {
-                *error = xasprintf("Passed file descriptor must not be negative, '%s' : %d", key, handle);
-                goto finito;
-            }
+                goto exit_loop_on_error;
 
             ssize_t count = safe_read(handle, real_value, sizeof(real_value) - 1);
             if (count <= 0)
             {
-                *error = xasprintf("Cannot read passed file descriptor: '%s' : %d", key, handle);
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Cannot read passed file descriptor: '%s' : %d",
+                            key, handle);
                 close(handle);
-                goto finito;
+                goto exit_loop_on_error;
             }
 
-            char *new_line = strchrnul(real_value, '\n');
-            *new_line = '\0';
+            /* Replace '\n' with '\0' */
+            strchrnul(real_value, '\n')[0] = '\0';
             log_debug("Got first line : %s", real_value);
 
             if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
             {
-                *error = xasprintf("You are not allowed to create element '%s' containing '%s'", key, real_value);
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "You are not allowed to create element '%s' containing '%s'",
+                            key, real_value);
                 close(handle);
-                goto finito;
+                goto exit_loop_on_error;
             }
 
-            /* rewind() */
-            //lseek(handle, 0, SEEK_SET);
-
-            char fd_path[] = "/proc/self/fd/"STRINGIZE(INT_MAX);
-            snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", handle);
-            problem_data_add_file(pd, key, fd_path);
+            problem_data_add_file_descriptor(pd, key, handle);
         }
+        continue;
+
+exit_loop_on_error:
+        g_free(key);
+        g_variant_unref(value);
+        goto finito;
     }
 
     if (caller_uid != 0 || problem_data_get_content_or_NULL(pd, FILENAME_UID) == NULL)
@@ -103,8 +99,9 @@ static const char *handle_new_problem(GDBusConnection *connection,
 
     if (problem_id)
         notify_new_path(problem_id);
-    else if (error)
-        *error = xasprintf("Cannot create a new problem");
+    else
+        g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                            "Failed to create new problem");
 
 finito:
     problem_data_free(pd);
@@ -145,23 +142,22 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("NewProblem", method_name) == 0)
     {
-        char *err_msg = NULL;
-
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        const char *new_path = handle_new_problem(connection,
-                                g_variant_get_child_value(parameters, 0),
+        GError *error = NULL;
+        GVariant *data = g_variant_get_child_value(parameters, 0);
+        const char *new_path = handle_NewProblem(connection,
+                                data,
                                 caller_uid,
                                 fd_list,
-                                &err_msg);
+                                &error);
+        g_variant_unref(data);
 
         if (!new_path)
         {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                                      "org.freedesktop.problems.Failure",
-                                                      err_msg);
-            free(err_msg);
+            g_dbus_method_invocation_return_gerror(invocation, error);
+            g_error_free(error);
             return;
         }
         /* else */
@@ -190,15 +186,15 @@ static void dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
-        GVariantBuilder *builder = g_variant_builder_new(G_VARIANT_TYPE("ao"));
+        GVariantBuilder builder;
+        g_variant_builder_init(&builder, G_VARIANT_TYPE("ao"));
 
         GList *problem_nodes = abrt_problems2_service_get_problems_nodes(caller_uid);
         for (GList *p = problem_nodes; p != NULL; p = g_list_next(p))
-            g_variant_builder_add(builder, "o", (char*)p->data);
+            g_variant_builder_add(&builder, "o", (char*)p->data);
         g_list_free(problem_nodes);
 
-        response = g_variant_new("(ao)", builder);
-        g_variant_builder_unref(builder);
+        response = g_variant_new("(ao)", &builder);
 
         g_dbus_method_invocation_return_value(invocation, response);
         return;
@@ -219,7 +215,8 @@ static void dbus_method_call(GDBusConnection *connection,
             return;
         }
 
-        GVariantBuilder *response_builder = g_variant_builder_new(G_VARIANT_TYPE_ARRAY);
+        GVariantBuilder response_builder;
+        g_variant_builder_init(&response_builder, G_VARIANT_TYPE_ARRAY);
 
         GHashTableIter pd_iter;
         char *element_name;
@@ -234,15 +231,14 @@ static void dbus_method_call(GDBusConnection *connection,
                 continue;
             }
 
-            g_variant_builder_add(response_builder, "{s(its)}",
+            g_variant_builder_add(&response_builder, "{s(its)}",
                                                     element_name,
                                                     element_info->flags,
                                                     size,
                                                     element_info->content);
         }
 
-        GVariant *response = g_variant_new("(a{s(its)})", response_builder);
-        g_variant_builder_unref(response_builder);
+        GVariant *response = g_variant_new("(a{s(its)})", &response_builder);
 
         problem_data_free(pd);
 
@@ -264,6 +260,7 @@ static void dbus_method_call(GDBusConnection *connection,
             {
                 g_dbus_method_invocation_return_gerror(invocation, error);
                 g_error_free(error);
+                g_free(entry_node);
                 return;
             }
         }

@@ -66,7 +66,7 @@ def expect_dbus_error(error, method, *args):
         print("FAILURE: Expected D-Bus error: %s" % (error))
     except dbus.exceptions.DBusException as ex:
         if str(ex) != error:
-            print("FAILURE: caught invalid text:\n\tExpected: %s\n\tGot     :%s\n" % (error, str(ex)))
+            print("FAILURE: caught invalid text:\n\tExpected: %s\n\tGot     : %s\n" % (error, str(ex)))
 
 
 def dictionary_key_has_value(dictionary, key, expected):
@@ -90,7 +90,7 @@ def test_fake_binary_type(tf):
                        "executable"  : "/usr/bin/foo",
                        "type"        : dbus.types.UnixFd(type_file)}
 
-        expect_dbus_error("org.freedesktop.problems.Failure: You are not allowed to create element 'type' containing 'CCpp'",
+        expect_dbus_error("org.freedesktop.DBus.Error.InvalidArgs: You are not allowed to create element 'type' containing 'CCpp'",
                               tf.p2.NewProblem, description)
 
 

@@ -54,12 +54,12 @@ int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t ui
         return -ENOTDIR;
     }
 
-    int ret = dd_accessible_by_uid(tmp, uid) ? 0 : -EACCES;
+    const int ret = dd_accessible_by_uid(tmp, uid) ? 0 : -EACCES;
 
-    if (dd == NULL)
-        dd_close(tmp);
-    else
+    if (ret == 0 && dd != NULL)
         *dd = tmp;
+    else
+        dd_close(tmp);
 
     return ret;
 }
@@ -196,15 +196,20 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
             || (elem_type & CD_FLAG_BIN))
         {
             free(data);
-            lseek(fd, 0, SEEK_SET);
+            if (lseek(fd, 0, SEEK_SET))
+            {
+                perror_msg("Failed to rewind file descriptor of %s", name);
+                close(fd);
+                continue;
+            }
 
             GError *error = NULL;
             gint pos = g_unix_fd_list_append(fd_list, fd, &error);
+            close(fd);
             if (error != NULL)
             {
                 error_msg("Failed to add file descriptor of %s: %s", name, error->message);
                 g_error_free(error);
-                close(fd);
                 continue;
             }
 
@@ -339,7 +344,6 @@ static void dbus_method_call(GDBusConnection *connection,
         g_variant_get_child(parameters, 1, "i", &flags);
 
         GUnixFDList *fd_list = g_unix_fd_list_new();
-
 
         GVariant *retval = handle_ReadElements(dd, flags, elements, fd_list);
         g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
