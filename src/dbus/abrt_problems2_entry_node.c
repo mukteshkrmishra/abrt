@@ -232,6 +232,63 @@ next_element:
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
+static void handle_SaveElements(struct dump_dir *dd, gint flags,
+                                GVariant *elements, GUnixFDList *fd_list)
+{
+    GVariantIter iter;
+    GVariant *item;
+    g_variant_iter_init(&iter, elements);
+    while ((item = g_variant_iter_next_value(&iter)))
+    {
+        GVariant *name_variant = g_variant_get_child_value(item, 0);
+        GVariant *container = g_variant_get_child_value(item, 1);
+        GVariant *value_variant = g_variant_get_child_value(container, 0);
+
+        const gchar *data = g_variant_print(value_variant, TRUE);
+        const char *name = g_variant_get_string(name_variant, /*length*/NULL);
+        log_debug("Saving element: %s -> %s", name, data);
+
+        if (!str_is_correct_filename(name))
+        {
+            error_msg("Attempt to save prohibited data: '%s'", name);
+            goto next_element;
+        }
+
+        if (g_variant_is_of_type(value_variant, G_VARIANT_TYPE_STRING))
+        {
+            log_debug("Saving text element");
+            const char *value = g_variant_get_string(value_variant, /*length*/NULL);
+            dd_save_text(dd, name, value);
+            goto next_element;
+        }
+
+        if (g_variant_is_of_type(value_variant, G_VARIANT_TYPE_HANDLE))
+        {
+            log_debug("Saving data from file descriptor");
+            gint32 handle = g_variant_get_handle(value_variant);
+
+            GError *error = NULL;
+            int fd = g_unix_fd_list_get(fd_list, handle, &error);
+            if (error != NULL)
+            {
+                error_msg("Failed to get file descriptor of %s: %s", name, error->message);
+                goto next_element;
+            }
+
+            dd_copy_fd(dd, name, fd);
+            close(fd);
+            goto next_element;
+        }
+
+        error_msg("Unsupported type: %s", g_variant_get_type_string(value_variant));
+next_element:
+        g_variant_unref(value_variant);
+        g_variant_unref(container);
+        g_variant_unref(name_variant);
+        g_variant_unref(item);
+    }
+}
+
 /* D-Bus method handler
  */
 static void dbus_method_call(GDBusConnection *connection,
@@ -267,6 +324,15 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp(method_name, "ReadElements") == 0)
     {
+        dd = dd_fdopendir(dd, DD_OPEN_READONLY | DD_DONT_WAIT_FOR_LOCK);
+        if (dd == NULL)
+        {
+            g_dbus_method_invocation_return_error(invocation,
+                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to obtain the lock");
+            return;
+        }
+
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
         gint flags;
@@ -274,16 +340,27 @@ static void dbus_method_call(GDBusConnection *connection,
 
         GUnixFDList *fd_list = g_unix_fd_list_new();
 
+
         GVariant *retval = handle_ReadElements(dd, flags, elements, fd_list);
         g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
 
         g_variant_unref(elements);
         g_object_unref(fd_list);
+        dd_close(dd);
         return;
     }
 
     if (strcmp(method_name, "SaveElements") == 0)
     {
+        dd = dd_fdopendir(dd, DD_OPEN_READONLY | DD_DONT_WAIT_FOR_LOCK);
+        if (dd == NULL)
+        {
+            g_dbus_method_invocation_return_error(invocation,
+                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to obtain the lock");
+            return;
+        }
+
         GVariant *elements = g_variant_get_child_value(parameters, 0);
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
@@ -291,11 +368,12 @@ static void dbus_method_call(GDBusConnection *connection,
         gint flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        GVariant *retval = handle_SaveElements(dd, flags, elements, fd_list);
-        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
+        handle_SaveElements(dd, flags, elements, fd_list);
+        GVariant *retval = g_variant_new("(i)", 0);
+        g_dbus_method_invocation_return_value(invocation, retval);
 
         g_variant_unref(elements);
-        g_object_unref(fd_list);
+        dd_close(dd);
         return;
     }
 

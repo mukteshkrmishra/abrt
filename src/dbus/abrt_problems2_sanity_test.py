@@ -59,6 +59,7 @@ class TestFrame(object):
         self.tm = GLib.timeout_add(1000, self.interrupt_waiting)
         self.loop.run()
 
+
 def expect_dbus_error(error, method, *args):
     try:
         method(*args)
@@ -66,6 +67,14 @@ def expect_dbus_error(error, method, *args):
     except dbus.exceptions.DBusException as ex:
         if str(ex) != error:
             print("FAILURE: caught invalid text:\n\tExpected: %s\n\tGot     :%s\n" % (error, str(ex)))
+
+
+def dictionary_key_has_value(dictionary, key, expected):
+    if not key in dictionary:
+        print("FAILURE: missing '%s'" % (key))
+    elif dictionary[key] != expected:
+        print("FAILURE: key '%s', expected: '%s', is:'%s'", key, expected, resp[key])
+
 
 def test_fake_binary_type(tf):
     print("TEST FAKE BINARY TYPE")
@@ -513,11 +522,34 @@ def test_read_elements(tf):
         print("FAILURE: not returned fd when ALL_FD | ONLY_TEXT requested")
 
     fd = reasonlist["reason"].take()
-    data = os.read(fd, len("Application has been killed"))
+
+    # try read few more bytes to verify that the file is not broken
+    data = os.read(fd, len("Application has been killed") + 10)
     if "Application has been killed" != data.decode():
         print("FAILURE: invalid data read from file descriptor : '%s'" % (data))
     os.close(fd)
 
+
+def test_save_elements(tf):
+    print("TEST SAVE ELEMENTS")
+
+    shorttext = "line one\nline two\nline three\n"
+    with open("/tmp/shorttext", "w") as shorttext_file:
+        shorttext_file.write(shorttext)
+
+    with open("/tmp/shorttext", "r") as fstab_file:
+        request = { "random" : "random text",
+                    "shorttext" : dbus.types.UnixFd(fstab_file) }
+
+        p2e = Problems2Entry(tf.bus, tf.problem_id)
+        dummy = p2e.SaveElements(request, 0)
+
+    resp = p2e.ReadElements(["random", "shorttext"], 0x00)
+    if len(resp) != 2:
+        print("FAILURE: not returned both requested elements")
+
+    dictionary_key_has_value(resp, "random", "random text")
+    dictionary_key_has_value(resp, "shorttext", shorttext)
 
 
 if __name__ == "__main__":
@@ -564,4 +596,5 @@ if __name__ == "__main__":
     test_private_problem_not_accessible(tf)
     test_problem_entry_properties(tf)
     test_read_elements(tf)
+    test_save_elements(tf)
 

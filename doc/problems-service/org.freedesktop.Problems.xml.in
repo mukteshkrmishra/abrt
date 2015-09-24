@@ -751,6 +751,9 @@ for prblmprx in problems.GetProblems():
                     <tp:docstring>This argument can be used in future to allow the caller to choose whether he want to append the elements or truncate them.</tp:docstring>
                 </arg>
 
+                <arg type='i' name='void' direction='out'>
+                    <tp:docstring>Unused return value</tp:docstring>
+                </arg>
             </method>
 
             <method name='DeleteElements'>
