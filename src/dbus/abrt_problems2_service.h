@@ -34,6 +34,7 @@ int abrt_problems2_service_remove_problem(GDBusConnection *connection, const cha
 problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path, uid_t caller_uid, GError **error);
 
 void *abrt_problems2_service_get_node(const char *path);
+void abrt_problems2_service_remove_node(GDBusConnection *connection, const char *path);
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
 

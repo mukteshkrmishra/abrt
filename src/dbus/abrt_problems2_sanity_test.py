@@ -291,8 +291,8 @@ def test_get_session(tf):
     print("TEST GET SESSION")
 
     p2_session_obj = tf.p2.GetSession()
-    if p2_session_obj != "/org/freedesktop/Problems2/Session/1":
-        print("FAILURE : wrong session path : %s" % (str(p2_session_obj)))
+    if not p2_session_obj.startswith("/org/freedesktop/Problems2/Session/"):
+        print("FAILURE : strange session path : %s" % (str(p2_session_obj)))
 
     tf.p2_session_proxy = tf.bus.get_object(BUS_NAME, p2_session_obj)
     tf.p2_session_props = dbus.Interface(tf.p2_session_proxy, dbus_interface=dbus.PROPERTIES_IFACE)

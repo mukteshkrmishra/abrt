@@ -26,12 +26,10 @@
 
 struct p2s_node
 {
-    char   *p2s_path;
     char   *p2s_caller;
     uid_t   p2s_uid;
     int     p2s_state;
     time_t  p2s_stamp;
-    guint   p2s_regid;
 };
 
 enum
@@ -40,53 +38,19 @@ enum
     P2S_STATE_AUTH,
 };
 
-static void p2s_node_free(struct p2s_node *node)
-{
-    if (NULL == node)
-        return;
-
-    free(node->p2s_path);
-    node->p2s_path = (void *)0xDEADBEEF;
-
-    free(node->p2s_caller);
-    node->p2s_caller = (void *)0xDEADBEEF;
-}
-
-static GHashTable *s_p2s_nodes;
-
-static GHashTable *nodes_table(void)
-{
-    if (s_p2s_nodes == NULL)
-        s_p2s_nodes = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, (GDestroyNotify)p2s_node_free);
-
-    return s_p2s_nodes;
-}
-
 static struct p2s_node *get_session(const gchar *caller,
                              uid_t caller_uid,
                              const gchar *path,
                              GError      **error)
 {
-    struct p2s_node *node = abrt_problems2_session_find_node(caller);
-    if (node != NULL)
-    {
-        if (   strcmp(node->p2s_caller, caller) != 0
-            || strcmp(node->p2s_path, path) != 0
-            || node->p2s_uid != caller_uid)
-        {
-            log_warning("Problems2 Session object does not belong to UID %d", caller_uid);
-
-            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                    "Your Problems2 Session is broken. Check system logs for more details.");
-
-            return NULL;
-        }
-    }
+    struct p2s_node *node = abrt_problems2_service_get_node(path);
+    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, error) != 0)
+        return NULL;
 
     return node;
 }
 
-static void change_state(struct p2s_node* node, int new_state, GDBusConnection *connection)
+static void change_state(const char *path, struct p2s_node* node, int new_state, GDBusConnection *connection)
 {
     if (node->p2s_state == new_state)
         return;
@@ -105,15 +69,17 @@ static void change_state(struct p2s_node* node, int new_state, GDBusConnection *
     GError *error = NULL;
     GVariant *parameters = g_variant_new("(i)", value);
 
-    log("Emitting signal: %s, %s, org.freedesktop.Problems2.Session, AuthorizationChanged", ABRT_P2_BUS, node->p2s_path);
+    log("Emitting signal: %s, %s, org.freedesktop.Problems2.Session, AuthorizationChanged", ABRT_P2_BUS, path);
 
-    GDBusMessage *message = g_dbus_message_new_signal (node->p2s_path,
+    GDBusMessage *message = g_dbus_message_new_signal (path,
                                          ABRT_P2_NS_MEMBER("Session"),
                                          "AuthorizationChanged");
 
     g_dbus_message_set_sender(message, ABRT_P2_BUS);
+    /* parameters will be freed */
     g_dbus_message_set_body(message, parameters);
     g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
+    g_object_unref(message);
     if (error != NULL)
     {
         error_msg("Failed to emit 'AuthorizationChanged': %s", error->message);
@@ -195,7 +161,7 @@ static void dbus_method_call(GDBusConnection *connection,
                 case P2S_STATE_INIT:
                     if (polkit_check_authorization_dname(caller, "org.freedesktop.problems.getall") == PolkitYes)
                     {
-                        change_state(node, P2S_STATE_AUTH, connection);
+                        change_state(object_path, node, P2S_STATE_AUTH, connection);
                         retval = 0;
                     }
                     break;
@@ -224,7 +190,7 @@ static void dbus_method_call(GDBusConnection *connection,
         switch(node->p2s_state)
         {
             case P2S_STATE_AUTH:
-                change_state(node, P2S_STATE_INIT, connection);
+                change_state(object_path, node, P2S_STATE_INIT, connection);
                 break;
 
             case P2S_STATE_INIT:
@@ -234,11 +200,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
         g_dbus_method_invocation_return_value(invocation, NULL);
 
-        /* TODO: This should be handled by the service module */
-        g_dbus_connection_unregister_object(connection, node->p2s_regid);
-
-        g_hash_table_remove(nodes_table(), node->p2s_caller);
-
+        abrt_problems2_service_remove_node(connection, object_path);
         return;
     }
 
@@ -292,18 +254,11 @@ GDBusInterfaceVTable *abrt_problems2_session_node_vtable(void)
 
 /* Public interface */
 
-struct p2s_node *abrt_problems2_session_new_node(char *path, char *caller, uid_t uid, guint regid)
+struct p2s_node *abrt_problems2_session_node_new(char *caller, uid_t uid)
 {
-    {
-        struct p2s_node *new_node_dup = abrt_problems2_session_find_node(caller);
-        assert(new_node_dup == NULL);
-    }
-
     struct p2s_node *node = xmalloc(sizeof(*node));
-    node->p2s_path = path;
     node->p2s_caller = caller;
     node->p2s_uid = uid;
-    node->p2s_regid = regid;
 
     if (node->p2s_uid == 0)
         node->p2s_state = P2S_STATE_AUTH;
@@ -312,27 +267,35 @@ struct p2s_node *abrt_problems2_session_new_node(char *path, char *caller, uid_t
 
     node->p2s_stamp = time(NULL);
 
-    g_hash_table_insert(nodes_table(), caller, node);
-
     return node;
 }
 
-const char *abrt_problems2_session_node_path(struct p2s_node *session)
+void abrt_problems2_session_node_free(struct p2s_node *node)
 {
-    return session->p2s_path;
-}
+    if (NULL == node)
+        return;
 
-guint abrt_problems2_session_node_registration_id(struct p2s_node *session)
-{
-    return session->p2s_regid;
-}
-
-struct p2s_node *abrt_problems2_session_find_node(const char *caller)
-{
-    return (struct p2s_node *)g_hash_table_lookup(nodes_table(), caller);
+    free(node->p2s_caller);
+    node->p2s_caller = (void *)0xDEADBEEF;
 }
 
 int abrt_problems2_session_is_authorized(struct p2s_node *session)
 {
     return session->p2s_state == P2S_STATE_AUTH;
+}
+
+int abrt_problems2_session_check_sanity(struct p2s_node *session,
+            const char *caller,
+            uid_t caller_uid,
+            GError **error)
+{
+    if (strcmp(session->p2s_caller, caller) == 0 && session->p2s_uid == caller_uid)
+        /* the session node is sane */
+        return 0;
+
+    log_warning("Problems2 Session object does not belong to UID %d", caller_uid);
+
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+            "Your Problems2 Session is broken. Check system logs for more details.");
+    return -1;
 }
