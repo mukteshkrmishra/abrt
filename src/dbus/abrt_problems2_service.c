@@ -45,6 +45,8 @@ void p2_user_info_free(struct p2_user_info *info)
     if (info == NULL)
         return;
 
+    info->sessions = (unsigned)-1;
+
     free(info);
 }
 
@@ -64,7 +66,14 @@ void abrt_problems2_object_free(struct abrt_problems2_object *obj)
     if (obj->destructor)
         obj->destructor(obj);
 
+    obj->node = (void *)0xDEADBEAF;
+    obj->destructor = (void *)0xDEADBEAF;
+
     free(obj->path);
+    obj->path = (void *)0xDEADBEAF;
+
+    obj->regid = (guint)-1;
+
     free(obj);
 }
 
@@ -73,20 +82,21 @@ void *abrt_problems2_object_get_node(struct abrt_problems2_object *object)
     return object->node;
 }
 
-void abrt_problems2_object_destroy(struct abrt_problems2_object *object, GDBusConnection *connection)
+void abrt_problems2_object_destroy(struct abrt_problems2_object *object,
+        GDBusConnection *connection)
 {
     log_debug("Unregistering object: %s", object->path);
     g_dbus_connection_unregister_object(connection, object->regid);
 }
 
 static int register_object(GDBusConnection *connection,
-            GDBusInterfaceInfo *interface,
-            char *path,
-            GDBusInterfaceVTable *vtable,
-            void *node,
-            void (*destructor)(struct abrt_problems2_object *),
-            GHashTable *table,
-            struct abrt_problems2_object **object)
+        GDBusInterfaceInfo *interface,
+        char *path,
+        GDBusInterfaceVTable *vtable,
+        void *node,
+        void (*destructor)(struct abrt_problems2_object *),
+        GHashTable *table,
+        struct abrt_problems2_object **object)
 {
     GError *error = NULL;
     struct abrt_problems2_object *obj = NULL;
@@ -231,7 +241,7 @@ static struct abrt_problems2_object *get_session_for_caller(GDBusConnection *con
     return obj;
 }
 
-const char *abrt_problems2_get_session_path(GDBusConnection *connection,
+const char *abrt_problems2_service_session_path(GDBusConnection *connection,
         const char *caller,
         GError **error)
 {
@@ -303,7 +313,7 @@ void entry_object_destructor(struct abrt_problems2_object *obj)
 {
     struct p2e_node *entry = (struct p2e_node *)obj->node;
 
-    g_hash_table_remove(g_problems2_sessions, obj->path);
+    g_hash_table_remove(g_problems2_entries, obj->path);
     abrt_problems2_entry_node_free(entry);
 }
 
@@ -331,7 +341,29 @@ static const char *register_dump_dir_entry_node(GDBusConnection *connection, con
     return path;
 }
 
-const char *abrt_problems2_service_save_problem(GDBusConnection *connection, problem_data_t *pd, char **problem_id)
+void abrt_problems2_service_emit_signal(GDBusConnection *connection,
+        const char *path,
+        const char *iface,
+        const char *member,
+        GVariant *parameters)
+{
+    GDBusMessage *message = g_dbus_message_new_signal(path, iface, member);
+    g_dbus_message_set_sender(message, ABRT_P2_BUS);
+    g_dbus_message_set_body(message, parameters);
+
+    GError *error = NULL;
+    g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
+    g_object_unref(message);
+    if (error != NULL)
+    {
+        error_msg("Failed to emit signal '%s': %s", member, error->message);
+        g_free(error);
+    }
+}
+
+const char *abrt_problems2_service_save_problem(GDBusConnection *connection,
+        problem_data_t *pd,
+        char **problem_id)
 {
     char *new_problem_id = problem_data_save(pd);
 
@@ -351,24 +383,16 @@ const char *abrt_problems2_service_save_problem(GDBusConnection *connection, pro
         int uid = uid_str != NULL ? atoi(uid_str) : 0;
         GVariant *parameters = g_variant_new("(oi)", entry_node_path, uid);
 
-        GDBusMessage *message = g_dbus_message_new_signal (ABRT_P2_PATH, ABRT_P2_NS, "Crash");
-        g_dbus_message_set_sender(message, ABRT_P2_BUS);
-        g_dbus_message_set_body(message, parameters);
-
-        GError *error = NULL;
-        g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
-        g_object_unref(message);
-        if (error != NULL)
-        {
-            error_msg("Failed to emit 'Crash': %s", error->message);
-            g_free(error);
-        }
+        abrt_problems2_service_emit_signal(connection, ABRT_P2_PATH, ABRT_P2_NS, "Crash", parameters);
     }
 
     return entry_node_path;
 }
 
-int abrt_problems2_service_remove_problem(GDBusConnection *connection, const char *entry_path, uid_t caller_uid, GError **error)
+int abrt_problems2_service_remove_problem(GDBusConnection *connection,
+        const char *entry_path,
+        uid_t caller_uid,
+        GError **error)
 {
     struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
     if (obj == NULL)
@@ -381,14 +405,13 @@ int abrt_problems2_service_remove_problem(GDBusConnection *connection, const cha
     if (ret != 0)
         return ret;
 
-    /* Destroys the variable obj too*/
-    g_hash_table_remove(g_problems2_entries, entry_path);
-
     abrt_problems2_object_destroy(obj, connection);
     return 0;
 }
 
-problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path, uid_t caller_uid, GError **error)
+problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path,
+        uid_t caller_uid,
+        GError **error)
 {
     struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
     if (obj == NULL)

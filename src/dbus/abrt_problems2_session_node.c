@@ -54,26 +54,8 @@ static void change_state(const char *path, struct p2s_node* node, int new_state,
     else
         goto forgotten_state;
 
-    GError *error = NULL;
     GVariant *parameters = g_variant_new("(i)", value);
-
-    log("Emitting signal: %s, %s, org.freedesktop.Problems2.Session, AuthorizationChanged", ABRT_P2_BUS, path);
-
-    GDBusMessage *message = g_dbus_message_new_signal (path,
-                                         ABRT_P2_NS_MEMBER("Session"),
-                                         "AuthorizationChanged");
-
-    g_dbus_message_set_sender(message, ABRT_P2_BUS);
-    /* parameters will be freed */
-    g_dbus_message_set_body(message, parameters);
-    g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
-    g_object_unref(message);
-    if (error != NULL)
-    {
-        error_msg("Failed to emit 'AuthorizationChanged': %s", error->message);
-        g_free(error);
-    }
-
+    abrt_problems2_service_emit_signal(connection, path, ABRT_P2_NS_MEMBER("Session"), "AuthorizationChanged", parameters);
     return;
 
 forgotten_state:
@@ -94,7 +76,7 @@ static void dbus_method_call(GDBusConnection *connection,
     log_debug("Problems2.Sessions method : %s", method_name);
 
     /* Check sanity */
-    if (strcmp(interface_name, "org.freedesktop.Problems2.Session") != 0)
+    if (strcmp(interface_name, ABRT_P2_NS_MEMBER("Session")) != 0)
     {
         error_msg("Unsupported interface %s", interface_name);
         return;

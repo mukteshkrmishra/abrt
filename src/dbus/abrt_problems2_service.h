@@ -25,19 +25,44 @@
 #define ABRT_P2_NS "org.freedesktop.Problems2"
 #define ABRT_P2_NS_MEMBER(name) ABRT_P2_NS"."name
 
+/*
+ * D-Bus object representation
+ */
 struct abrt_problems2_object;
 
 void *abrt_problems2_object_get_node(struct abrt_problems2_object *object);
-void abrt_problems2_object_destroy(struct abrt_problems2_object *object, GDBusConnection *connection);
 
-const char *abrt_problems2_get_session_path(GDBusConnection *connection, const char *caller, GError **error);
-uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection, const char *caller, GError **error);
-uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection, const char *caller, GError **error);
+void abrt_problems2_object_destroy(struct abrt_problems2_object *object,
+            GDBusConnection *connection);
 
-const char *abrt_problems2_service_save_problem(GDBusConnection *connection, problem_data_t *pd, char **problem_id);
-int abrt_problems2_service_remove_problem(GDBusConnection *connection, const char *entry_path, uid_t caller_uid, GError **error);
-problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path, uid_t caller_uid, GError **error);
+/*
+ * Shared functionality
+ */
+const char *abrt_problems2_service_session_path(GDBusConnection *connection,
+            const char *caller, GError **error);
+
+uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection,
+            const char *caller, GError **error);
+
+uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
+        const char *caller, GError **error);
+
+const char *abrt_problems2_service_save_problem(GDBusConnection *connection,
+            problem_data_t *pd, char **problem_id);
+
+int abrt_problems2_service_remove_problem(GDBusConnection *connection,
+            const char *entry_path, uid_t caller_uid, GError **error);
+
+problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path,
+        uid_t caller_uid, GError **error);
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
+
+/*
+ * Utility methods
+ */
+void abrt_problems2_service_emit_signal(GDBusConnection *connection,
+            const char *path, const char *iface, const char *member,
+            GVariant *parameters);
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

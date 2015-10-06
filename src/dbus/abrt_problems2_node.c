@@ -169,7 +169,7 @@ static void dbus_method_call(GDBusConnection *connection,
     else if (strcmp("GetSession", method_name) == 0)
     {
         GError *error = NULL;
-        const char *session_path = abrt_problems2_get_session_path(connection, caller, &error);
+        const char *session_path = abrt_problems2_service_session_path(connection, caller, &error);
 
         if (!session_path)
         {
