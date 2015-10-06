@@ -26,6 +26,7 @@ struct p2s_node;
 struct p2s_node *abrt_problems2_session_node_new(char *caller, uid_t uid);
 void abrt_problems2_session_node_free(struct p2s_node *session);
 
+uid_t abrt_problems2_session_uid(struct p2s_node *session);
 int abrt_problems2_session_is_authorized(struct p2s_node *session);
 int abrt_problems2_session_check_sanity(struct p2s_node *session, const char *caller, uid_t caller_uid, GError **error);
 

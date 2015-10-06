@@ -38,18 +38,6 @@ enum
     P2S_STATE_AUTH,
 };
 
-static struct p2s_node *get_session(const gchar *caller,
-                             uid_t caller_uid,
-                             const gchar *path,
-                             GError      **error)
-{
-    struct p2s_node *node = abrt_problems2_service_get_node(path);
-    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, error) != 0)
-        return NULL;
-
-    return node;
-}
-
 static void change_state(const char *path, struct p2s_node* node, int new_state, GDBusConnection *connection)
 {
     if (node->p2s_state == new_state)
@@ -122,8 +110,8 @@ static void dbus_method_call(GDBusConnection *connection,
         return;
     }
 
-    struct p2s_node *node = get_session(caller, caller_uid, object_path, &error);
-    if (node == NULL)
+    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
+    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, &error) != 0)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
         return;
@@ -200,7 +188,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
         g_dbus_method_invocation_return_value(invocation, NULL);
 
-        abrt_problems2_service_remove_node(connection, object_path);
+        abrt_problems2_object_destroy(user_data, connection);
         return;
     }
 
@@ -233,8 +221,8 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
         return NULL;
 
-    struct p2s_node *node = get_session(caller, caller_uid, object_path, error);
-    if (node == NULL)
+    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
+    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, error) != 0)
         return NULL;
 
     return g_variant_new_boolean(abrt_problems2_session_is_authorized(node));
@@ -277,6 +265,11 @@ void abrt_problems2_session_node_free(struct p2s_node *node)
 
     free(node->p2s_caller);
     node->p2s_caller = (void *)0xDEADBEEF;
+}
+
+uid_t abrt_problems2_session_uid(struct p2s_node *session)
+{
+    return session->p2s_uid;
 }
 
 int abrt_problems2_session_is_authorized(struct p2s_node *session)

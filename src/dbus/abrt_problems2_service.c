@@ -37,7 +37,7 @@ static GHashTable *g_connected_users;
 
 struct p2_user_info
 {
-    GList *sessions;
+    unsigned sessions;
 };
 
 void p2_user_info_free(struct p2_user_info *info)
@@ -45,32 +45,38 @@ void p2_user_info_free(struct p2_user_info *info)
     if (info == NULL)
         return;
 
-    g_list_free_full(info->sessions, NULL);
     free(info);
 }
 
-struct p2_object
+struct abrt_problems2_object
 {
+    char *path;
     guint regid;
     void *node;
-    void (*destructor)(void *);
-
-    void *destroy_notify_args;
-    void (*destroy_notify)(struct p2_object *);
+    void (*destructor)(struct abrt_problems2_object *);
 };
 
-void p2_object_free(struct p2_object *obj)
+void abrt_problems2_object_free(struct abrt_problems2_object *obj)
 {
     if (obj == NULL)
         return;
 
-    if (obj->destroy_notify)
-        obj->destroy_notify(obj);
-
     if (obj->destructor)
-        obj->destructor(obj->node);
+        obj->destructor(obj);
 
+    free(obj->path);
     free(obj);
+}
+
+void *abrt_problems2_object_get_node(struct abrt_problems2_object *object)
+{
+    return object->node;
+}
+
+void abrt_problems2_object_destroy(struct abrt_problems2_object *object, GDBusConnection *connection)
+{
+    log_debug("Unregistering object: %s", object->path);
+    g_dbus_connection_unregister_object(connection, object->regid);
 }
 
 static int register_object(GDBusConnection *connection,
@@ -78,11 +84,20 @@ static int register_object(GDBusConnection *connection,
             char *path,
             GDBusInterfaceVTable *vtable,
             void *node,
-            void (*node_destructor)(void *),
+            void (*destructor)(struct abrt_problems2_object *),
             GHashTable *table,
-            struct p2_object **object)
+            struct abrt_problems2_object **object)
 {
     GError *error = NULL;
+    struct abrt_problems2_object *obj = NULL;
+
+    if (node != NULL)
+    {
+        obj = xzalloc(sizeof(*obj));
+        obj->path = path;
+        obj->node = node;
+        obj->destructor = destructor;
+    }
 
     /* Register the interface parsed from a XML file */
     log_debug("Registering PATH %s iface %s", path, interface->name);
@@ -90,8 +105,8 @@ static int register_object(GDBusConnection *connection,
             path,
             interface,
             vtable,
-            /*user data*/NULL,
-            /*destroy notify*/NULL,
+            obj,
+            (GDestroyNotify)abrt_problems2_object_free,
             &error);
 
     if (registration_id == 0)
@@ -99,23 +114,18 @@ static int register_object(GDBusConnection *connection,
         error_msg("Could not register object '%s': %s", path, error->message);
         g_error_free(error);
 
-        if (node != NULL)
-        {
-            free(path);
-            node_destructor(node);
-        }
+        if (obj != NULL)
+            abrt_problems2_object_free(obj);
 
         return -1;
     }
 
-    if (node == NULL)
+    log_debug("Registered object: %d", registration_id);
+
+    if (obj == NULL)
         return 0;
 
-    struct p2_object *obj = xzalloc(sizeof(*obj));
-
     obj->regid = registration_id;
-    obj->node = node;
-    obj->destructor = node_destructor;
 
     g_hash_table_insert(table, path, obj);
     if (object != NULL)
@@ -124,25 +134,66 @@ static int register_object(GDBusConnection *connection,
     return 0;
 }
 
-static struct p2_object *register_session_object(GDBusConnection *connection,
+void session_object_destructor(struct abrt_problems2_object *obj)
+{
+    struct p2s_node *session = (struct p2s_node *)obj->node;
+
+    uid_t uid = abrt_problems2_session_uid(session);
+    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+                                            (gconstpointer)(gint64)uid);
+
+    user->sessions -= 1;
+    if (user->sessions == 0)
+        g_hash_table_remove(g_connected_users, (gconstpointer)(gint64)uid);
+
+    g_hash_table_remove(g_problems2_sessions, obj->path);
+    abrt_problems2_session_node_free(session);
+}
+
+static struct abrt_problems2_object *register_session_object(GDBusConnection *connection,
         char *path,
         const char *caller,
-        uid_t caller_uid)
+        uid_t caller_uid,
+        GError **error)
 {
+    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+                                        (gconstpointer)(gint64)caller_uid);
+
+    if (user != NULL && user->sessions >= g_users_clients_limit)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Too many sessions opened");
+        free(path);
+        return NULL;
+    }
+
     char *dup_caller = xstrdup(caller);
     struct p2s_node *session = abrt_problems2_session_node_new(dup_caller, caller_uid);
-    struct p2_object *obj;
+    struct abrt_problems2_object *obj;
 
     const int r = register_object(connection,
                                   g_problems2_session_node->interfaces[0],
                                   path,
                                   abrt_problems2_session_node_vtable(),
                                   session,
-                                  (void (*)(void *))abrt_problems2_session_node_free,
+                                  session_object_destructor,
                                   g_problems2_sessions,
                                   &obj);
+
     if (r != 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Cannot register Session object");
         return NULL;
+    }
+
+    if (user == NULL)
+    {
+        user = xzalloc(sizeof(*user));
+        g_hash_table_insert(g_connected_users, (gpointer)(gint64)caller_uid, user);
+    }
+
+    ++user->sessions;
 
     return obj;
 }
@@ -154,64 +205,30 @@ static char *abrt_problems2_caller_to_session_path(const char *caller)
     return xasprintf(ABRT_P2_PATH"/Session/%s", hash_str);
 }
 
-void remove_session_from_users_list(struct p2_object *obj)
-{
-    struct p2_user_info *user = (struct p2_user_info *)obj->destroy_notify_args;
-    user->sessions = g_list_remove(user->sessions, obj->node);
-}
-
-static struct p2s_node *get_session_for_caller(GDBusConnection *connection,
+static struct abrt_problems2_object *get_session_for_caller(GDBusConnection *connection,
         const char *caller,
         uid_t caller_uid,
-        GError **error,
-        const char **path)
+        GError **error)
 {
     char *session_path = abrt_problems2_caller_to_session_path(caller);
-    struct p2s_node *session = abrt_problems2_service_get_node(session_path);
-    if (session == NULL)
+
+    struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_sessions, session_path);
+    if (obj == NULL)
     {
-        struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
-                                            (gconstpointer)(gint64)caller_uid);
-
-        if (user != NULL && g_list_length(user->sessions) >= g_users_clients_limit)
-        {
-            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                    "Too many sessions opened");
-            free(session_path);
-            return NULL;
-        }
-
-        struct p2_object *obj = register_session_object(connection, session_path, caller, caller_uid);
-        if (obj == NULL)
-        {
-            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                    "Cannot register Session object");
-            return NULL;
-        }
-
-        session = (struct p2s_node *)obj->node;
-
-        if (user == NULL)
-        {
-            user = xzalloc(sizeof(*user));
-            g_hash_table_insert(g_connected_users, (gpointer)(gint64)caller_uid, user);
-        }
-
-        user->sessions = g_list_append(user->sessions, session);
-        obj->destroy_notify_args = user;
-        obj->destroy_notify = remove_session_from_users_list;
+        log_debug("Caller does not have Session: %s", caller);
+        return register_session_object(connection, session_path, caller, caller_uid, error);
     }
-    else if (abrt_problems2_session_check_sanity(session, caller, caller_uid, error) < 0)
+
+    free(session_path);
+
+    struct p2s_node *session = abrt_problems2_object_get_node(obj);
+    if (abrt_problems2_session_check_sanity(session, caller, caller_uid, error) != 0)
     {
-        free(session_path);
         log_debug("Cannot return session because the existing one did not pass sanity check.");
         return NULL;
     }
 
-    if (path != NULL)
-        *path = session_path;
-
-    return session;
+    return obj;
 }
 
 const char *abrt_problems2_get_session_path(GDBusConnection *connection,
@@ -222,12 +239,8 @@ const char *abrt_problems2_get_session_path(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
         return NULL;
 
-    const char *session_path = NULL;
-    struct p2s_node *session = get_session_for_caller(connection, caller, caller_uid, error, &session_path);
-    if (session == NULL)
-        return NULL;
-
-    return session_path;
+    struct abrt_problems2_object *obj = get_session_for_caller(connection, caller, caller_uid, error);
+    return obj == NULL ? NULL : obj->path;
 }
 
 uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection,
@@ -238,10 +251,11 @@ uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
         return (uid_t)-1;
 
-    struct p2s_node *session = get_session_for_caller(connection, caller, caller_uid, error, NULL);
-    if (session == NULL)
+    struct abrt_problems2_object *obj = get_session_for_caller(connection, caller, caller_uid, error);
+    if (obj == NULL)
         return (uid_t) -1;
 
+    struct p2s_node *session = abrt_problems2_object_get_node(obj);
     if (abrt_problems2_session_is_authorized(session))
         return 0;
 
@@ -285,42 +299,12 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
     return caller_uid;
 }
 
-static struct p2_object *abrt_problems2_service_get_object(const char *path, GHashTable **table)
+void entry_object_destructor(struct abrt_problems2_object *obj)
 {
-    struct p2_object *obj;
+    struct p2e_node *entry = (struct p2e_node *)obj->node;
 
-    GHashTable *unused;
-    if (table == NULL)
-        table = &unused;
-
-    *table = g_problems2_entries;
-    obj = g_hash_table_lookup(g_problems2_entries, path);
-
-    if (obj == NULL)
-    {
-        *table = g_problems2_sessions;
-        obj = g_hash_table_lookup(g_problems2_sessions, path);
-    }
-
-    return obj;
-}
-
-void *abrt_problems2_service_get_node(const char *path)
-{
-    struct p2_object *obj = abrt_problems2_service_get_object(path, NULL);
-    return obj == NULL ? NULL : obj->node;
-}
-
-void abrt_problems2_service_remove_node(GDBusConnection *connection, const char *path)
-{
-    GHashTable *table;
-    struct p2_object *obj = abrt_problems2_service_get_object(path, &table);
-
-    guint regid = obj->regid;
-    /* Destroys the variable obj too*/
-    g_hash_table_remove(table, path);
-
-    g_dbus_connection_unregister_object(connection, regid);
+    g_hash_table_remove(g_problems2_sessions, obj->path);
+    abrt_problems2_entry_node_free(entry);
 }
 
 static const char *register_dump_dir_entry_node(GDBusConnection *connection, const char *dd_dirname)
@@ -337,7 +321,7 @@ static const char *register_dump_dir_entry_node(GDBusConnection *connection, con
                                   path,
                                   abrt_problems2_entry_node_vtable(),
                                   entry,
-                                  (void (*)(void *))abrt_problems2_entry_node_free,
+                                  entry_object_destructor,
                                   g_problems2_entries,
                                   NULL);
 
@@ -386,7 +370,7 @@ const char *abrt_problems2_service_save_problem(GDBusConnection *connection, pro
 
 int abrt_problems2_service_remove_problem(GDBusConnection *connection, const char *entry_path, uid_t caller_uid, GError **error)
 {
-    struct p2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
+    struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
     if (obj == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS, "Requested Entry does not exist");
@@ -397,18 +381,16 @@ int abrt_problems2_service_remove_problem(GDBusConnection *connection, const cha
     if (ret != 0)
         return ret;
 
-    const guint regid = obj->regid;
-
     /* Destroys the variable obj too*/
     g_hash_table_remove(g_problems2_entries, entry_path);
 
-    g_dbus_connection_unregister_object(connection, regid);
+    abrt_problems2_object_destroy(obj, connection);
     return 0;
 }
 
 problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path, uid_t caller_uid, GError **error)
 {
-    struct p2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
+    struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_entries, entry_path);
     if (obj == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS, "Requested Entry does not exist");
@@ -426,7 +408,7 @@ GList *abrt_problems2_service_get_problems_nodes(uid_t uid)
     g_hash_table_iter_init(&iter, g_problems2_entries);
 
     const char *p;
-    struct p2_object *obj;
+    struct abrt_problems2_object *obj;
     while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
     {
         if (0 == abrt_problems2_entry_node_accessible_by_uid((struct p2e_node *)obj->node, uid, NULL))
@@ -531,8 +513,8 @@ int main(int argc, char *argv[])
         error_msg_and_die("Could not parse Session interface: %s", error->message);
 
     g_connected_users = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)p2_user_info_free);
-    g_problems2_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)p2_object_free);
-    g_problems2_sessions = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)p2_object_free);
+    g_problems2_entries = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+    g_problems2_sessions = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
                               ABRT_P2_BUS,

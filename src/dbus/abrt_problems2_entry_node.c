@@ -121,6 +121,7 @@ problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, ui
 }
 
 static struct p2e_node *get_entry(GDBusConnection *connection,
+                          struct abrt_problems2_object *object,
                           const gchar *caller,
                           const gchar *object_path,
                           struct dump_dir **dd,
@@ -130,7 +131,7 @@ static struct p2e_node *get_entry(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
         return NULL;
 
-    struct p2e_node *node = abrt_problems2_service_get_node(object_path);
+    struct p2e_node *node = abrt_problems2_object_get_node(object);
     if (node == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
@@ -309,7 +310,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
     GError *error = NULL;
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, caller, object_path, &dd, &error);
+    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, &error);
     if (node == NULL)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -442,7 +443,7 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     GVariant *retval;
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, caller, object_path, &dd, error);
+    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, error);
     if (node == NULL)
         return NULL;
 
@@ -597,7 +598,7 @@ static gboolean dbus_set_property(GDBusConnection *connection,
     log_debug("Problems2.Entry set property : %s", property_name);
 
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, caller, object_path, &dd, error);
+    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, error);
     if (node == NULL)
         return FALSE;
 
