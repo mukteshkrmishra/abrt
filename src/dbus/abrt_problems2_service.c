@@ -27,23 +27,45 @@
 
 static GMainLoop *g_loop;
 static int g_timeout_value = 10;
+static int g_users_clients_limit = 5;
 static GDBusNodeInfo *g_problems2_node;
 static GDBusNodeInfo *g_problems2_session_node;
 static GDBusNodeInfo *g_problems2_entry_node;
 static GHashTable *g_problems2_entries;
 static GHashTable *g_problems2_sessions;
+static GHashTable *g_connected_users;
+
+struct p2_user_info
+{
+    GList *sessions;
+};
+
+void p2_user_info_free(struct p2_user_info *info)
+{
+    if (info == NULL)
+        return;
+
+    g_list_free_full(info->sessions, NULL);
+    free(info);
+}
 
 struct p2_object
 {
     guint regid;
     void *node;
     void (*destructor)(void *);
+
+    void *destroy_notify_args;
+    void (*destroy_notify)(struct p2_object *);
 };
 
 void p2_object_free(struct p2_object *obj)
 {
     if (obj == NULL)
         return;
+
+    if (obj->destroy_notify)
+        obj->destroy_notify(obj);
 
     if (obj->destructor)
         obj->destructor(obj->node);
@@ -57,7 +79,8 @@ static int register_object(GDBusConnection *connection,
             GDBusInterfaceVTable *vtable,
             void *node,
             void (*node_destructor)(void *),
-            GHashTable *table)
+            GHashTable *table,
+            struct p2_object **object)
 {
     GError *error = NULL;
 
@@ -88,24 +111,27 @@ static int register_object(GDBusConnection *connection,
     if (node == NULL)
         return 0;
 
-    struct p2_object *obj = xmalloc(sizeof(*obj));
+    struct p2_object *obj = xzalloc(sizeof(*obj));
 
     obj->regid = registration_id;
     obj->node = node;
     obj->destructor = node_destructor;
 
     g_hash_table_insert(table, path, obj);
+    if (object != NULL)
+        *object = obj;
 
     return 0;
 }
 
-static struct p2s_node *register_session_object(GDBusConnection *connection,
+static struct p2_object *register_session_object(GDBusConnection *connection,
         char *path,
         const char *caller,
         uid_t caller_uid)
 {
     char *dup_caller = xstrdup(caller);
     struct p2s_node *session = abrt_problems2_session_node_new(dup_caller, caller_uid);
+    struct p2_object *obj;
 
     const int r = register_object(connection,
                                   g_problems2_session_node->interfaces[0],
@@ -113,11 +139,12 @@ static struct p2s_node *register_session_object(GDBusConnection *connection,
                                   abrt_problems2_session_node_vtable(),
                                   session,
                                   (void (*)(void *))abrt_problems2_session_node_free,
-                                  g_problems2_sessions);
+                                  g_problems2_sessions,
+                                  &obj);
     if (r != 0)
         return NULL;
 
-    return session;
+    return obj;
 }
 
 static char *abrt_problems2_caller_to_session_path(const char *caller)
@@ -125,6 +152,12 @@ static char *abrt_problems2_caller_to_session_path(const char *caller)
     char hash_str[SHA1_RESULT_LEN*2 + 1];
     str_to_sha1str(hash_str, caller);
     return xasprintf(ABRT_P2_PATH"/Session/%s", hash_str);
+}
+
+void remove_session_from_users_list(struct p2_object *obj)
+{
+    struct p2_user_info *user = (struct p2_user_info *)obj->destroy_notify_args;
+    user->sessions = g_list_remove(user->sessions, obj->node);
 }
 
 static struct p2s_node *get_session_for_caller(GDBusConnection *connection,
@@ -137,7 +170,36 @@ static struct p2s_node *get_session_for_caller(GDBusConnection *connection,
     struct p2s_node *session = abrt_problems2_service_get_node(session_path);
     if (session == NULL)
     {
-        session = register_session_object(connection, session_path, caller, caller_uid);
+        struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+                                            (gconstpointer)(gint64)caller_uid);
+
+        if (user != NULL && g_list_length(user->sessions) >= g_users_clients_limit)
+        {
+            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Too many sessions opened");
+            free(session_path);
+            return NULL;
+        }
+
+        struct p2_object *obj = register_session_object(connection, session_path, caller, caller_uid);
+        if (obj == NULL)
+        {
+            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Cannot register Session object");
+            return NULL;
+        }
+
+        session = (struct p2s_node *)obj->node;
+
+        if (user == NULL)
+        {
+            user = xzalloc(sizeof(*user));
+            g_hash_table_insert(g_connected_users, (gpointer)(gint64)caller_uid, user);
+        }
+
+        user->sessions = g_list_append(user->sessions, session);
+        obj->destroy_notify_args = user;
+        obj->destroy_notify = remove_session_from_users_list;
     }
     else if (abrt_problems2_session_check_sanity(session, caller, caller_uid, error) < 0)
     {
@@ -276,7 +338,8 @@ static const char *register_dump_dir_entry_node(GDBusConnection *connection, con
                                   abrt_problems2_entry_node_vtable(),
                                   entry,
                                   (void (*)(void *))abrt_problems2_entry_node_free,
-                                  g_problems2_entries);
+                                  g_problems2_entries,
+                                  NULL);
 
     if (r != 0)
         return NULL;
@@ -390,7 +453,8 @@ static void on_bus_acquired(GDBusConnection *connection,
                                   abrt_problems2_node_vtable(),
                                   /*node*/NULL,
                                   /*node destructor*/NULL,
-                                  /*node table*/NULL);
+                                  /*node table*/NULL,
+                                  NULL);
 
     if (r == 0)
         for_each_problem_in_dir(g_settings_dump_location, (uid_t)-1, bridge_register_dump_dir_entry_node, connection);
@@ -466,6 +530,7 @@ int main(int argc, char *argv[])
     if (error != NULL)
         error_msg_and_die("Could not parse Session interface: %s", error->message);
 
+    g_connected_users = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)p2_user_info_free);
     g_problems2_entries = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)p2_object_free);
     g_problems2_sessions = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify)p2_object_free);
 
@@ -490,6 +555,7 @@ int main(int argc, char *argv[])
 
     g_hash_table_destroy(g_problems2_sessions);
     g_hash_table_destroy(g_problems2_entries);
+    g_hash_table_destroy(g_connected_users);
 
     g_dbus_node_info_unref(g_problems2_entry_node);
     g_dbus_node_info_unref(g_problems2_session_node);

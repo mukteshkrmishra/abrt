@@ -59,21 +59,30 @@ class TestFrame(object):
         self.tm = GLib.timeout_add(1000, self.interrupt_waiting)
         self.loop.run()
 
+def error(message):
+    sys.stderr.write("ERROR: ")
+    sys.stderr.write(message)
+    sys.stderr.write("\n")
+
+
+def assert_equals(expected, real_value, description="Strings are not equal"):
+    if expected != real_value:
+        error("%s: \n\tExpected: %s\n\tGot     : %s\n" % (description, expected, real_value))
+
 
 def expect_dbus_error(error, method, *args):
     try:
         method(*args)
-        print("FAILURE: Expected D-Bus error: %s" % (error))
+        error(" Expected D-Bus error: %s" % (error))
     except dbus.exceptions.DBusException as ex:
-        if str(ex) != error:
-            print("FAILURE: caught invalid text:\n\tExpected: %s\n\tGot     : %s\n" % (error, str(ex)))
+        assert_equals(error, str(ex), "Exception has invalid text")
 
 
 def dictionary_key_has_value(dictionary, key, expected):
     if not key in dictionary:
-        print("FAILURE: missing '%s'" % (key))
+        error("missing '%s'" % (key))
     elif dictionary[key] != expected:
-        print("FAILURE: key '%s', expected: '%s', is:'%s'", key, expected, dictionary[key])
+        error("key '%s', expected: '%s', is:'%s'", key, expected, dictionary[key])
 
 
 def test_fake_binary_type(tf):
@@ -126,19 +135,19 @@ def test_real_problem(tf):
             tf.problem_first_occurrence = time.time()
             tf.problem_id = tf.p2.NewProblem(description)
             if not tf.problem_id:
-                print("FAILURE : empty return value")
+                error("empty return value")
 
 
 def test_crash_signal(tf):
     print("TEST CRASH SIGNAL")
 
     if len(tf.crash_signal_occurrences) != 1:
-        print("FAILURE : Crash signal wasn't emitted")
+        error("Crash signal wasn't emitted")
     else:
         if tf.crash_signal_occurrences[0][0] != tf.problem_id:
-            print("FAILURE : Crash signal was emitted with wrong PATH")
+            error("Crash signal was emitted with wrong PATH")
         if tf.crash_signal_occurrences[0][1] != os.geteuid():
-            print("FAILURE : Crash signal was emitted with wrong UID")
+            error("Crash signal was emitted with wrong UID")
 
 
 def test_get_problems(tf):
@@ -146,13 +155,13 @@ def test_get_problems(tf):
 
     p = tf.p2.GetProblems()
     if not p:
-        print("FAILURE: no problems")
+        error("no problems")
 
     if not tf.problem_id in p:
-        print("FAILURE: missing our problem")
+        error("missing our problem")
 
     if tf.private_problem_id in p:
-        print("FAILURE: contains private problem")
+        error("contains private problem")
 
 
 def test_get_problem_data(tf):
@@ -182,18 +191,18 @@ def test_get_problem_data(tf):
 
     for k, v in expected.items():
         if not k in p:
-            print("FAILURE: missing " + k)
+            error("missing " + k)
             continue
 
         g = p[k]
         if not re.match(v[2], g[2]):
-            print("FAILURE: invalid contents of '%s'" % (k))
+            error("invalid contents of '%s'" % (k))
 
         if g[1] != v[1]:
-            print("FAILURE: invalid length '%s' : %i" % (k, g[1]))
+            error("invalid length '%s' : %i" % (k, g[1]))
 
         if (g[0] & v[0]) != v[0]:
-            print("FAILURE: invalid flags %s : %i" % (k, g[0]))
+            error("invalid flags %s : %i" % (k, g[0]))
 
 
 def test_get_private_problem(tf):
@@ -201,18 +210,18 @@ def test_get_private_problem(tf):
 
     p = tf.p2.GetProblems()
     if not p:
-        print("FAILURE: no problems")
+        error("no problems")
 
     if not tf.problem_id in p:
-        print("FAILURE: missing our problem")
+        error("missing our problem")
 
     if not tf.private_problem_id in p:
-        print("FAILURE: missing private problem")
+        error("missing private problem")
 
     p = tf.p2.GetProblemData(tf.private_problem_id)
 
     if p["uid"][2] != "0":
-        print("FAILURE: invalid UID")
+        error("invalid UID")
 
 
 def test_private_problem_not_accessible(tf):
@@ -220,13 +229,13 @@ def test_private_problem_not_accessible(tf):
 
     p = tf.p2.GetProblems()
     if not p:
-        print("FAILURE: no problems")
+        error("no problems")
 
     if not tf.problem_id in p:
-        print("FAILURE: missing our problem")
+        error("missing our problem")
 
     if tf.private_problem_id in p:
-        print("FAILURE: accessible private problem")
+        error("accessible private problem")
 
     expect_dbus_error(DBUS_ERROR_ACCESS_DENIED_READ,
             tf.p2.GetProblemData, tf.private_problem_id)
@@ -257,23 +266,23 @@ def test_delete_problems(tf):
 
     p = tf.p2.GetProblems()
     if not(one in p and two in p and three in p):
-        print("FAILURE: problems not detected")
+        error("problems not detected")
 
     tf.p2.DeleteProblems([one])
 
     p = tf.p2.GetProblems()
     if one in p:
-        print("FAILURE: 'one' not removed")
+        error("'one' not removed")
 
     if not(two in p and three in p):
-        print("FAILURE: 'two' and 'three' disappeared")
+        error("'two' and 'three' disappeared")
 
     expect_dbus_error(DBUS_ERROR_BAD_ADDRESS,
             tf.p2.DeleteProblems, [two, three, one])
 
     p = tf.p2.GetProblems()
     if two in p and three in p:
-        print("FAILURE: 'two' and 'three' not removed")
+        error("'two' and 'three' not removed")
 
     tf.p2.DeleteProblems([])
 
@@ -292,35 +301,34 @@ def test_get_session(tf):
 
     p2_session_obj = tf.p2.GetSession()
     if not p2_session_obj.startswith("/org/freedesktop/Problems2/Session/"):
-        print("FAILURE : strange session path : %s" % (str(p2_session_obj)))
+        error("strange session path : %s" % (str(p2_session_obj)))
 
     tf.p2_session_proxy = tf.bus.get_object(BUS_NAME, p2_session_obj)
     tf.p2_session_props = dbus.Interface(tf.p2_session_proxy, dbus_interface=dbus.PROPERTIES_IFACE)
     tf.p2_session = dbus.Interface(tf.p2_session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
 
     if tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
-        print("FAILURE : is authorized by default")
-    return False
+        error("is authorized by default")
 
 
 def test_authrorize(tf):
     print("TEST AUTHORIZE")
 
     if tf.p2_session.Authorize(dbus.types.String(), 1) != 0:
-        print("FAILURE : cannot authorize")
+        error("cannot authorize")
 
     if not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
-        print("FAILURE : not authorized")
+        error("not authorized")
 
 
 def test_authrorize_signal(tf):
     print("TEST AUTHORIZE SIGNAL")
 
     if len(tf.ac_signal_occurrences) != 1:
-        print("FAILURE : signal wasn't emitted")
+        error("signal wasn't emitted")
 
     if len(tf.ac_signal_occurrences) == 1 and tf.ac_signal_occurrences[0] != 0:
-        print("FAILURE : signal was emitted with wrong number")
+        error("signal was emitted with wrong number")
 
 
 def test_close(tf):
@@ -334,17 +342,17 @@ def test_close(tf):
     tf.p2_session = dbus.Interface(tf.p2_session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
 
     if tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
-        print("FAILURE : still authorized")
+        error("still authorized")
 
 
 def test_close_signal(tf):
     print("TEST CLOSE SIGNAL")
 
     if len(tf.ac_signal_occurrences) != 2:
-        print("FAILURE : signal wasn't emitted")
+        error("signal wasn't emitted")
 
     if len(tf.ac_signal_occurrences) == 2 and tf.ac_signal_occurrences[1] != 1:
-        print("FAILURE : signal was emitted with wrong number")
+        error("signal was emitted with wrong number")
 
 
 def create_problem(p2):
@@ -383,80 +391,80 @@ def test_problem_entry_properties(tf):
     p2e = Problems2Entry(tf.bus, tf.problem_id)
 
     if not re.match("/var/spool/abrt/problems2testsuite_type[^/]*", p2e.getproperty("id")):
-        print("FAILURE: strange problem ID")
+        error("strange problem ID")
 
     if p2e.getproperty("user") != pwd.getpwuid(os.geteuid()).pw_name:
-        print("FAILURE: strange username")
+        error("strange username")
 
     if p2e.getproperty("hostname") != socket.gethostname():
-        print("FAILURE: invalid hostname")
+        error("invalid hostname")
 
     if p2e.getproperty("type") != "problems2testsuite_type":
-        print("FAILURE: invalid type")
+        error("invalid type")
 
     if p2e.getproperty("executable") != "/usr/bin/foo":
-        print("FAILURE: invalid executable")
+        error("invalid executable")
 
     if p2e.getproperty("command_line_arguments") != "/usr/bin/foo --blah":
-        print("FAILURE: invalid command_line_arguments")
+        error("invalid command_line_arguments")
 
     if p2e.getproperty("component") != "abrt":
-        print("FAILURE: invalid component")
+        error("invalid component")
 
     if p2e.getproperty("duphash") != "FEDCBA9876543210":
-        print("FAILURE: invalid duphash")
+        error("invalid duphash")
 
     if p2e.getproperty("uuid") != "0123456789ABCDEF":
-        print("FAILURE: invalid uuid")
+        error("invalid uuid")
 
     if p2e.getproperty("reason") != "Application has been killed":
-        print("FAILURE: invalid reason")
+        error("invalid reason")
 
     if p2e.getproperty("uid") != os.geteuid():
-        print("FAILURE: strange uid")
+        error("strange uid")
 
     if p2e.getproperty("count") != 1:
-        print("FAILURE: count is not 1")
+        error("count is not 1")
 
     if abs(p2e.getproperty("first_occurrence") - tf.problem_first_occurrence) >= 5:
-        print("FAILURE: too old first occurrence")
+        error("too old first occurrence")
 
     if p2e.getproperty("first_occurrence") != p2e.getproperty("last_occurrence"):
-        print("FAILURE: first_occurrence and last_occurrence differ")
+        error("first_occurrence and last_occurrence differ")
 
     if abs(p2e.getproperty("last_occurrence") - tf.problem_first_occurrence) >= 5:
-        print("FAILURE: too old last occurrence")
+        error("too old last occurrence")
 
     if not p2e.getproperty("is_reported"):
-        print("FAILURE: 'is_reported' == FALSE but should be reported")
+        error("'is_reported' == FALSE but should be reported")
 
     if not p2e.getproperty("can_be_reported"):
-        print("FAILURE: 'cannot be reported' but should be report-able")
+        error("'cannot be reported' but should be report-able")
 
     if p2e.getproperty("is_remote"):
-        print("FAILURE: 'is_remote' but should not be remote")
+        error("'is_remote' but should not be remote")
 
     package = p2e.getproperty("package")
     if len(package) != 5:
-        print("FAILURE: insufficient number of package members")
+        error("insufficient number of package members")
 
     if package != ("problems2-1.2-3", "", "problems2", "1.2", "3"):
-        print("FAILURE: invalid package struct %s" % (str(package)))
+        error("invalid package struct %s" % (str(package)))
 
     elements = p2e.getproperty("elements")
     if len(elements) == 0:
-        print("FAILURE: insufficient number of elements")
+        error("insufficient number of elements")
 
     for e in ["analyzer", "type", "reason", "backtrace", "executable", "uuid",
               "duphash", "package", "pkg_name", "pkg_version", "pkg_release",
               "cmdline", "component", "hugetext", "binary", "count", "time"]:
 
         if not e in elements:
-            print("FAILURE: missing element %s" % (e))
+            error("missing element %s" % (e))
 
     reports = p2e.getproperty("reports")
     if len(reports) != 3:
-        print("FAILURE: missing some reports")
+        error("missing some reports")
 
     exp = [
         ("ABRT Server", { "BTHASH" : "0123456789ABCDEF", "MSG" : "test"}),
@@ -466,10 +474,10 @@ def test_problem_entry_properties(tf):
 
     for i in range(0, len(e) - 1):
         if exp[i][0] != reports[i][0]:
-            print("FAILURE: invalid label %d, %s" % (i, reports[i][0]))
+            error("invalid label %d, %s" % (i, reports[i][0]))
 
         if exp[i][1] != reports[i][1]:
-            print("FAILURE: invalid value %d, %s" % (i, str(reports[i][1])))
+            error("invalid value %d, %s" % (i, str(reports[i][1])))
 
 
 def test_read_elements(tf):
@@ -484,49 +492,49 @@ def test_read_elements(tf):
 
     for r, t in requested.items():
         if not r in elements:
-            print("FAILURE: response is missing %s" % (r))
+            error("response is missing %s" % (r))
             continue
 
         if type(elements[r]) != t:
-            print("FAILURE: invalid type of %s: %s" % (r, str(type(elements[r]))))
+            error("invalid type of %s: %s" % (r, str(type(elements[r]))))
 
     resp = p2e.ReadElements([], 0x0)
     if len(resp) != 0:
-        print("FAILURE: the response for an empty request is not empty")
+        error("the response for an empty request is not empty")
 
     resp = p2e.ReadElements(["foo"], 0x0)
     if len(resp) != 0:
-        print("FAILURE: the response for an request with non-existing element is not empty")
+        error("the response for an request with non-existing element is not empty")
 
     resp = p2e.ReadElements(["/etc/shadow", "../../../../etc/shadow"], 0x0)
     if len(resp) != 0:
-        print("FAILURE: the response for an request with prohibited elements is not empty")
+        error("the response for an request with prohibited elements is not empty")
 
     reasonlist = p2e.ReadElements(["reason"], 0x08)
     if reasonlist:
-        print("FAILURE: returned text when ONLY_BIG_TEXT requested")
+        error("returned text when ONLY_BIG_TEXT requested")
 
     reasonlist = p2e.ReadElements(["reason"], 0x10)
     if reasonlist:
-        print("FAILURE: returned text when ONLY_BIN requested")
+        error("returned text when ONLY_BIN requested")
 
     reasonlist = p2e.ReadElements(["reason"], 0x04)
     if len(reasonlist) != 1:
-        print("FAILURE: not returned text when ONLY_TEXT requested")
+        error("not returned text when ONLY_TEXT requested")
 
     if reasonlist["reason"] != "Application has been killed":
-        print("FAILURE: invalid data returned")
+        error("invalid data returned")
 
     reasonlist = p2e.ReadElements(["reason"], 0x01 | 0x04)
     if len(reasonlist) != 1:
-        print("FAILURE: not returned fd when ALL_FD | ONLY_TEXT requested")
+        error("not returned fd when ALL_FD | ONLY_TEXT requested")
 
     fd = reasonlist["reason"].take()
 
     # try read few more bytes to verify that the file is not broken
     data = os.read(fd, len("Application has been killed") + 10)
     if "Application has been killed" != data.decode():
-        print("FAILURE: invalid data read from file descriptor : '%s'" % (data))
+        error("invalid data read from file descriptor : '%s'" % (data))
     os.close(fd)
 
 
@@ -547,11 +555,11 @@ def test_save_elements(tf):
 
     elements = p2e.getproperty("elements")
     if not "random" in elements or not "shorttext" in elements:
-        print("FAILURE: property 'elements' does not include the created elements")
+        error("property 'elements' does not include the created elements")
 
     resp = p2e.ReadElements(["random", "shorttext"], 0x00)
     if len(resp) != 2:
-        print("FAILURE: not returned both requested elements")
+        error("not returned both requested elements")
 
     dictionary_key_has_value(resp, "random", "random text")
     dictionary_key_has_value(resp, "shorttext", shorttext)
@@ -568,13 +576,13 @@ def test_save_elements(tf):
 
     try:
         os.unlink("/tmp/shadow")
-        print("FAILURE: accepted an absolute path")
+        error("accepted an absolute path")
     except OSError:
         pass
 
     try:
         os.unlink("/tmp/passwd")
-        print("FAILURE: accepted a relative path")
+        error("accepted a relative path")
     except OSError:
         pass
 
@@ -592,19 +600,19 @@ def test_delete_elements(tf):
     elements = p2e.getproperty("elements")
     for e in deleted_elements.keys():
         if not e in elements:
-            print("FAILURE: element does not exist: %s" % (e))
+            error("element does not exist: %s" % (e))
 
     p2e.DeleteElements(["delete_one"])
     elements = p2e.getproperty("elements")
     if "delete_one" in elements:
-        print("FAILURE: 'delete_one' has not been removed")
+        error("'delete_one' has not been removed")
     if not "delete_two" in elements or not "delete_six" in elements:
-        print("FAILURE: the other elements have disappeared")
+        error("the other elements have disappeared")
 
     p2e.DeleteElements(["delete_one", "delete_two", "delete_six"])
     elements = p2e.getproperty("elements")
     if "delete_two" in elements or "delete_six" in elements:
-        print("FAILURE: the other elements have not been removed")
+        error("the other elements have not been removed")
 
     p2e.DeleteElements([])
 
@@ -617,12 +625,40 @@ def test_delete_elements(tf):
     try:
         os.unlink("/tmp/shadow")
     except OSError as ex:
-        print ("FAILURE: removed an absolute path: %s" % (str(ex)))
+        error("removed an absolute path: %s" % (str(ex)))
 
     try:
         os.unlink("/tmp/passwd")
     except OSError as ex:
-        print ("FAILURE: removed a relative path: %s" % (str(ex)))
+        error("removed a relative path: %s" % (str(ex)))
+
+
+def test_open_too_many_sessions(tf):
+    print("TEST LIMIT OF OPENED SESSIONS")
+
+    sessions = dict()
+    i = 0
+    try:
+        while i < 10 :
+            bus = dbus.SystemBus(private=True)
+            p2_proxy = bus.get_object(BUS_NAME, '/org/freedesktop/Problems2')
+            p2 = dbus.Interface(p2_proxy, dbus_interface='org.freedesktop.Problems2')
+            p2s_path = p2.GetSession()
+            i += 1
+            if p2s_path in sessions:
+                error("got a session owned by another caller, run = %d" % (i))
+            else:
+                sessions[p2s_path] = (bus, p2_proxy, p2)
+        error("managed to open %d sessions" % (i))
+    except dbus.exceptions.DBusException as ex:
+        assert_equals("org.freedesktop.DBus.Error.Failed: Too many sessions opened", str(ex), "managed to open %d sessions" % (i))
+        # one session is already opened and 5 is the limit
+        assert_equals(4, i, "unexpected opened sessions limit")
+
+    for k, v in sessions.items():
+        p2s_proxy = v[0].get_object(BUS_NAME, k)
+        p2s = dbus.Interface(p2s_proxy, dbus_interface='org.freedesktop.Problems2.Session')
+        p2s.Close()
 
 
 if __name__ == "__main__":
@@ -671,3 +707,5 @@ if __name__ == "__main__":
     test_read_elements(tf)
     test_save_elements(tf)
     test_delete_elements(tf)
+
+    test_open_too_many_sessions(tf)
