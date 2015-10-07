@@ -35,6 +35,11 @@ void *abrt_problems2_object_get_node(struct abrt_problems2_object *object);
 void abrt_problems2_object_destroy(struct abrt_problems2_object *object,
             GDBusConnection *connection);
 
+void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
+            const char *member, GVariant *parameters,
+            GDBusConnection *connection);
+
+
 /*
  * Shared functionality
  */
@@ -57,12 +62,4 @@ problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path
         uid_t caller_uid, GError **error);
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
-
-/*
- * Utility methods
- */
-void abrt_problems2_service_emit_signal(GDBusConnection *connection,
-            const char *path, const char *iface, const char *member,
-            GVariant *parameters);
-
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

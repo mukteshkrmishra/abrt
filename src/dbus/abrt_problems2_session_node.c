@@ -38,8 +38,9 @@ enum
     P2S_STATE_AUTH,
 };
 
-static void change_state(const char *path, struct p2s_node* node, int new_state, GDBusConnection *connection)
+static void change_state(struct abrt_problems2_object *obj, int new_state, GDBusConnection *connection)
 {
+    struct p2s_node *node = abrt_problems2_object_get_node(obj);
     if (node->p2s_state == new_state)
         return;
 
@@ -55,7 +56,7 @@ static void change_state(const char *path, struct p2s_node* node, int new_state,
         goto forgotten_state;
 
     GVariant *parameters = g_variant_new("(i)", value);
-    abrt_problems2_service_emit_signal(connection, path, ABRT_P2_NS_MEMBER("Session"), "AuthorizationChanged", parameters);
+    abrt_problems2_object_emit_signal(obj, "AuthorizationChanged", parameters, connection);
     return;
 
 forgotten_state:
@@ -131,7 +132,7 @@ static void dbus_method_call(GDBusConnection *connection,
                 case P2S_STATE_INIT:
                     if (polkit_check_authorization_dname(caller, "org.freedesktop.problems.getall") == PolkitYes)
                     {
-                        change_state(object_path, node, P2S_STATE_AUTH, connection);
+                        change_state(user_data, P2S_STATE_AUTH, connection);
                         retval = 0;
                     }
                     break;
@@ -160,7 +161,7 @@ static void dbus_method_call(GDBusConnection *connection,
         switch(node->p2s_state)
         {
             case P2S_STATE_AUTH:
-                change_state(object_path, node, P2S_STATE_INIT, connection);
+                change_state(user_data, P2S_STATE_INIT, connection);
                 break;
 
             case P2S_STATE_INIT:
