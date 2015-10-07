@@ -26,6 +26,7 @@
 #include "abrt_problems2_entry_node.h"
 
 static GMainLoop *g_loop;
+static GDBusProxy *g_proxy_dbus;
 static int g_timeout_value = 10;
 static int g_users_clients_limit = 5;
 static GHashTable *g_connected_users;
@@ -297,8 +298,8 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
         GError **error)
 {
     guint caller_uid;
-
-    GDBusProxy * proxy = g_dbus_proxy_new_sync(connection,
+    if (g_proxy_dbus == NULL)
+        g_proxy_dbus = g_dbus_proxy_new_sync(connection,
                                      G_DBUS_PROXY_FLAGS_NONE,
                                      NULL,
                                      "org.freedesktop.DBus",
@@ -307,10 +308,10 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
                                      NULL,
                                      error);
 
-    if (proxy == NULL)
+    if (g_proxy_dbus == NULL)
         return (uid_t) -1;
 
-    GVariant *result = g_dbus_proxy_call_sync(proxy,
+    GVariant *result = g_dbus_proxy_call_sync(g_proxy_dbus,
                                      "GetConnectionUnixUser",
                                      g_variant_new ("(s)", caller),
                                      G_DBUS_CALL_FLAGS_NONE,
@@ -318,7 +319,6 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
                                      NULL,
                                      error);
 
-    g_object_unref(proxy);
     if (result == NULL)
         return (uid_t) -1;
 
@@ -572,6 +572,9 @@ int main(int argc, char *argv[])
     abrt_problems2_object_type_destroy(&g_problems2_entry_type);
     abrt_problems2_object_type_destroy(&g_problems2_session_type);
     abrt_problems2_object_type_destroy(&g_problems2_type);
+
+    if (g_proxy_dbus != NULL)
+        g_object_unref(g_proxy_dbus);
 
     free_abrt_conf_data();
 
