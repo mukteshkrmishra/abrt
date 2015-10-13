@@ -41,38 +41,19 @@ static const char *handle_NewProblem(GDBusConnection *connection,
         else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
         {
             log_debug("New file descriptor: %s", key);
-            /* We need to make sure that the caller does not try to pass
-             * prohibited element in form of a binary file.
-             *
-             * Get the first line and validate it. The firs line is enough.
-             */
-            char real_value[256] = { 0 };
+
+            if (problem_entry_is_post_create_condition(key))
+            {
+                log_debug("post-create element as File handle: %s", key);
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "Element '%s' must be of '%s' D-Bus type",
+                            key, g_variant_type_peek_string(G_VARIANT_TYPE_STRING));
+                goto exit_loop_on_error;
+            }
+
             gint handle = g_unix_fd_list_get(fd_list, g_variant_get_handle(value), error);
             if (handle < 0)
                 goto exit_loop_on_error;
-
-            ssize_t count = safe_read(handle, real_value, sizeof(real_value) - 1);
-            if (count <= 0)
-            {
-                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                            "Cannot read passed file descriptor: '%s' : %d",
-                            key, handle);
-                close(handle);
-                goto exit_loop_on_error;
-            }
-
-            /* Replace '\n' with '\0' */
-            strchrnul(real_value, '\n')[0] = '\0';
-            log_debug("Got first line : %s", real_value);
-
-            if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
-            {
-                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                            "You are not allowed to create element '%s' containing '%s'",
-                            key, real_value);
-                close(handle);
-                goto exit_loop_on_error;
-            }
 
             problem_data_add_file_descriptor(pd, key, handle);
         }

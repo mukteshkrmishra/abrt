@@ -93,14 +93,30 @@ def test_fake_binary_type(tf):
 
     with open("/tmp/fake_type", "r") as type_file:
         description = {"analyzer"    : "problems2testsuite_analyzer",
-                       "type"        : "problems2testsuite_type",
                        "reason"      : "Application has been killed",
                        "backtrace"   : "die()",
                        "executable"  : "/usr/bin/foo",
                        "type"        : dbus.types.UnixFd(type_file)}
 
-        expect_dbus_error("org.freedesktop.DBus.Error.InvalidArgs: You are not allowed to create element 'type' containing 'CCpp'",
+        expect_dbus_error("org.freedesktop.DBus.Error.InvalidArgs: Element 'type' must be of 's' D-Bus type",
                               tf.p2.NewProblem, description)
+
+
+def test_not_allowed_elements(tf):
+    print("TEST NOT ALLOWED ELEMENTS")
+
+    description = {"analyzer"    : "problems2testsuite_analyzer",
+                   "type"        : "CCpp",
+                   "reason"      : "Application has been killed",
+                   "backtrace"   : "die()",
+                   "executable"  : "/usr/bin/foo" }
+
+    expect_dbus_error("org.freedesktop.DBus.Error.InvalidArgs: You are not allowed to create element 'type' containing 'CCpp'",
+                          tf.p2.NewProblem, description)
+
+    pr_id = tf.root_p2.NewProblem(description)
+    if not pr_id:
+        error("root is not allowed to create type=CCpp")
 
 
 def test_real_problem(tf):
@@ -674,6 +690,7 @@ if __name__ == "__main__":
     tf = TestFrame(non_root_uid)
 
     test_fake_binary_type(tf)
+    test_not_allowed_elements(tf)
 
     tf.crash_signal_occurrences = []
     tf.p2.connect_to_signal("Crash", tf.handle_crash)
