@@ -31,6 +31,12 @@ static int g_timeout_value = 10;
 static int g_users_clients_limit = 5;
 static GHashTable *g_connected_users;
 struct abrt_problems2_object *g_problems2_object;
+static PolkitAuthority *g_polkit_authority;
+
+PolkitAuthority *abrt_problems2_polkit_authority(void)
+{
+    return g_polkit_authority;
+}
 
 struct p2_user_info
 {
@@ -367,6 +373,8 @@ void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
     g_dbus_message_set_sender(message, ABRT_P2_BUS);
     g_dbus_message_set_body(message, parameters);
 
+    log_debug("Emitting signal '%s'", member);
+
     GError *error = NULL;
     g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
     g_object_unref(message);
@@ -557,9 +565,15 @@ int main(int argc, char *argv[])
                               NULL,
                               (GDestroyNotify)NULL);
 
+    GError *error = NULL;
+    g_polkit_authority = polkit_authority_get_sync(NULL, &error);
+    if (g_polkit_authority == NULL)
+        error_msg_and_die(_("Failed to get PolkitAuthority: %s"), error->message);
 
     g_loop = g_main_loop_new(NULL, FALSE);
+
     signal(SIGABRT, quit_loop);
+
     g_main_loop_run(g_loop);
     g_main_loop_unref(g_loop);
 

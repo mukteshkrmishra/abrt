@@ -18,11 +18,17 @@
 
 #include "abrt_problems2_session_node.h"
 #include "abrt_problems2_service.h"
-#include "abrt-polkit.h"
 
 #include "libabrt.h"
 
 #include <assert.h>
+
+struct check_auth_cb_params
+{
+    struct abrt_problems2_object *obj;
+    GDBusConnection *connection;
+    GCancellable *cancellable;
+};
 
 struct p2s_node
 {
@@ -30,11 +36,13 @@ struct p2s_node
     uid_t   p2s_uid;
     int     p2s_state;
     time_t  p2s_stamp;
+    struct check_auth_cb_params *p2s_auth_rq;
 };
 
 enum
 {
     P2S_STATE_INIT,
+    P2S_STATE_PENDING,
     P2S_STATE_AUTH,
 };
 
@@ -48,10 +56,26 @@ static void change_state(struct abrt_problems2_object *obj, int new_state, GDBus
     int old_state = node->p2s_state;
     node->p2s_state = new_state;
 
-    if      (old_state == P2S_STATE_INIT && new_state == P2S_STATE_AUTH)
-        value = 0;
-    else if (old_state == P2S_STATE_AUTH && new_state == P2S_STATE_INIT)
+    if      (old_state == P2S_STATE_INIT    && new_state == P2S_STATE_PENDING)
+    {
+        log_debug("Authorization request is pending");
         value = 1;
+    }
+    else if (old_state == P2S_STATE_PENDING && new_state == P2S_STATE_AUTH)
+    {
+        log_debug("Authorization has been acquired");
+        value = 0;
+    }
+    else if (old_state == P2S_STATE_AUTH    && new_state == P2S_STATE_INIT)
+    {
+        log_debug("Authorization request has been lost");
+        value = 2;
+    }
+    else if (old_state == P2S_STATE_PENDING && new_state == P2S_STATE_INIT)
+    {
+        log_debug("Authorization request has failed");
+        value = 3;
+    }
     else
         goto forgotten_state;
 
@@ -61,6 +85,65 @@ static void change_state(struct abrt_problems2_object *obj, int new_state, GDBus
 
 forgotten_state:
     error_msg("BUG: unsupported state, current : %d, new : %d", node->p2s_state, new_state);
+}
+
+void authorization_request_destroy(struct abrt_problems2_object *obj)
+{
+    struct p2s_node *node = abrt_problems2_object_get_node(obj);
+
+    g_object_unref(node->p2s_auth_rq->cancellable);
+    node->p2s_auth_rq->cancellable = (void *)0xDEADBEEF;
+
+    free(node->p2s_auth_rq);
+    node->p2s_auth_rq = NULL;
+}
+
+void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer user_data)
+{
+    GError *error = NULL;
+    PolkitAuthorizationResult *result = NULL;
+    result = polkit_authority_check_authorization_finish(POLKIT_AUTHORITY(source), res, &error);
+
+    int new_state = P2S_STATE_INIT;
+    if (result == NULL)
+    {
+       error_msg("Polkit authorization failed: %s", error->message);
+       g_error_free(error);
+    }
+    else if (polkit_authorization_result_get_is_authorized(result))
+        new_state = P2S_STATE_AUTH;
+    else
+        log_debug("Not authorized");
+
+    g_object_unref(result);
+
+    struct check_auth_cb_params *params = (struct check_auth_cb_params *)user_data;
+    change_state(params->obj, new_state, params->connection);
+
+    /* Invalidates args/params !!! */
+    authorization_request_destroy(params->obj);
+}
+
+void authorization_request_initialize(struct abrt_problems2_object *obj, GDBusConnection *connection)
+{
+    struct p2s_node *node = abrt_problems2_object_get_node(obj);
+
+    struct check_auth_cb_params *auth_rq = xmalloc(sizeof(*auth_rq));
+    auth_rq->obj = obj;
+    auth_rq->connection = connection;
+    auth_rq->cancellable = g_cancellable_new();
+    node->p2s_auth_rq = auth_rq;
+    change_state(obj, P2S_STATE_PENDING, connection);
+
+    PolkitSubject *subject = polkit_system_bus_name_new(node->p2s_caller);
+    polkit_authority_check_authorization(abrt_problems2_polkit_authority(),
+                subject,
+                "org.freedesktop.problems.getall",
+                /* TODO: polkit.message */ NULL,
+                POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION,
+                auth_rq->cancellable,
+                check_authorization_callback,
+                auth_rq);
 }
 
 /* D-Bus method handler
@@ -104,51 +187,20 @@ static void dbus_method_call(GDBusConnection *connection,
     {
         int retval = -1;
 
-        const gchar *window_id = NULL;
-        gint32 flags;
-
-        g_variant_get(parameters, "(&si)", &window_id, &flags);
-
-        if ((flags & 1) && (flags & 2))
+        switch(node->p2s_state)
         {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                      "org.freedesktop.problems.InvalidArguments",
-                                      "You must use either 0x1 or 0x2.");
-            return;
-        }
+            case P2S_STATE_INIT:
+                authorization_request_initialize(user_data, connection);
+                retval = 1;
+                break;
 
-        if ((flags == 0) || (flags & (~3)))
-        {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                      "org.freedesktop.problems.InvalidArguments",
-                                      "Unsupported flags. You must use either 0x1 or 0x2.");
-            return;
-        }
+            case P2S_STATE_PENDING:
+                retval = 2;
+                break;
 
-        if (flags & 1)
-        {
-            switch(node->p2s_state)
-            {
-                case P2S_STATE_INIT:
-                    if (polkit_check_authorization_dname(caller, "org.freedesktop.problems.getall") == PolkitYes)
-                    {
-                        change_state(user_data, P2S_STATE_AUTH, connection);
-                        retval = 0;
-                    }
-                    break;
-
-                case P2S_STATE_AUTH:
-                    retval = 0;
-                    break;
-            }
-        }
-
-        if (flags & 2)
-        {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                      "org.freedesktop.problems.NotYetImplemented",
-                                      "0x2 is not yet implemented.");
-            return;
+            case P2S_STATE_AUTH:
+                retval = 0;
+                break;
         }
 
         GVariant *response = g_variant_new("(i)", retval);
@@ -162,6 +214,17 @@ static void dbus_method_call(GDBusConnection *connection,
         {
             case P2S_STATE_AUTH:
                 change_state(user_data, P2S_STATE_INIT, connection);
+                break;
+
+            case P2S_STATE_PENDING:
+                {
+                    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
+                    g_cancellable_cancel(node->p2s_auth_rq->cancellable);
+
+                    authorization_request_destroy(user_data);
+
+                    change_state(user_data, P2S_STATE_INIT, connection);
+                }
                 break;
 
             case P2S_STATE_INIT:

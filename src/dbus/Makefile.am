@@ -25,8 +25,6 @@ abrt_dbus_LDADD = \
 
 # TODO abrt-polkit to noninst library
 abrt_problems2_SOURCES = \
-    abrt-polkit.c \
-    abrt-polkit.h \
     abrt_problems2_service.c \
     abrt_problems2_service.h \
     abrt_problems2_node.c \

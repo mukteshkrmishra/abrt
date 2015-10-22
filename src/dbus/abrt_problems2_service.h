@@ -19,6 +19,7 @@
 #define ABRT_PROBLEMS2_SERVICE_H
 
 #include <libreport/problem_data.h>
+#include <polkit/polkit.h>
 
 #define ABRT_P2_BUS "org.freedesktop.problems"
 #define ABRT_P2_PATH "/org/freedesktop/Problems2"
@@ -62,4 +63,10 @@ problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path
         uid_t caller_uid, GError **error);
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
+
+/*
+ * Utilities
+ */
+PolkitAuthority *abrt_problems2_polkit_authority(void);
+
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

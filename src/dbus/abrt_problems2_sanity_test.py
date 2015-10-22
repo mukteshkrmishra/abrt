@@ -5,8 +5,9 @@ import time
 import re
 import dbus
 import pwd
-import time
 import socket
+import random
+import string
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
@@ -56,7 +57,7 @@ class TestFrame(object):
 
     def wait_for_signals(self, signals):
         self.signals = signals
-        self.tm = GLib.timeout_add(1000, self.interrupt_waiting)
+        self.tm = GLib.timeout_add(10000, self.interrupt_waiting)
         self.loop.run()
 
 def error(message):
@@ -65,7 +66,7 @@ def error(message):
     sys.stderr.write("\n")
 
 
-def assert_equals(expected, real_value, description="Strings are not equal"):
+def assert_equals(expected, real_value, description="Values are not equal"):
     if expected != real_value:
         error("%s: \n\tExpected: %s\n\tGot     : %s\n" % (description, expected, real_value))
 
@@ -73,7 +74,7 @@ def assert_equals(expected, real_value, description="Strings are not equal"):
 def expect_dbus_error(error, method, *args):
     try:
         method(*args)
-        error(" Expected D-Bus error: %s" % (error))
+        error("Expected D-Bus error: %s" % (error))
     except dbus.exceptions.DBusException as ex:
         assert_equals(error, str(ex), "Exception has invalid text")
 
@@ -82,7 +83,7 @@ def dictionary_key_has_value(dictionary, key, expected):
     if not key in dictionary:
         error("missing '%s'" % (key))
     elif dictionary[key] != expected:
-        error("key '%s', expected: '%s', is:'%s'", key, expected, dictionary[key])
+        error("key '%s', expected: '%s', is:'%s'" % (key, expected, dictionary[key]))
 
 
 def test_fake_binary_type(tf):
@@ -95,6 +96,8 @@ def test_fake_binary_type(tf):
         description = {"analyzer"    : "problems2testsuite_analyzer",
                        "reason"      : "Application has been killed",
                        "backtrace"   : "die()",
+                       "duphash"     : "FAKE_BINARY_TYPE",
+                       "uuid"        : "FAKE_BINARY_TYPE",
                        "executable"  : "/usr/bin/foo",
                        "type"        : dbus.types.UnixFd(type_file)}
 
@@ -108,6 +111,8 @@ def test_not_allowed_elements(tf):
     description = {"analyzer"    : "problems2testsuite_analyzer",
                    "type"        : "CCpp",
                    "reason"      : "Application has been killed",
+                   "duphash"     : "NOT_ALLOWED_ELEMENTS",
+                   "uuid"        : "NOT_ALLOWED_ELEMENTS",
                    "backtrace"   : "die()",
                    "executable"  : "/usr/bin/foo" }
 
@@ -330,27 +335,41 @@ def test_get_session(tf):
 def test_authrorize(tf):
     print("TEST AUTHORIZE")
 
-    if tf.p2_session.Authorize(dbus.types.String(), 1) != 0:
-        error("cannot authorize")
+    tf.ac_signal_occurrences = []
+    tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
 
-    if not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
-        error("not authorized")
+    ret = tf.p2_session.Authorize(dict())
+    assert_equals(1, ret, "Pending authorization request")
 
+    tf.wait_for_signals(["AuthorizationChanged"])
 
-def test_authrorize_signal(tf):
-    print("TEST AUTHORIZE SIGNAL")
+    if len(tf.ac_signal_occurrences) == 1:
+        assert_equals(1, tf.ac_signal_occurrences[0], "Pending signal")
+    else:
+        error("Pending signal wasn't emitted")
 
-    if len(tf.ac_signal_occurrences) != 1:
-        error("signal wasn't emitted")
+    if tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
+        error("Pending authorization request made Session authorized")
 
-    if len(tf.ac_signal_occurrences) == 1 and tf.ac_signal_occurrences[0] != 0:
-        error("signal was emitted with wrong number")
+    tf.wait_for_signals(["AuthorizationChanged"])
+
+    if len(tf.ac_signal_occurrences) == 2:
+        assert_equals(0, tf.ac_signal_occurrences[1], "Authorized signal")
+    else:
+        error("Authorized signal wasn't emitted")
 
 
 def test_close(tf):
     print("TEST CLOSE")
 
     tf.p2_session.Close()
+
+    tf.wait_for_signals(["AuthorizationChanged"])
+
+    if len(tf.ac_signal_occurrences) == 3:
+        assert_equals(2, tf.ac_signal_occurrences[2], "Closed session signal")
+    else:
+        error("Closed session signal wasn't emitted")
 
     p2_session_obj = tf.p2.GetSession()
     tf.p2_session_proxy = tf.bus.get_object(BUS_NAME, p2_session_obj)
@@ -361,21 +380,14 @@ def test_close(tf):
         error("still authorized")
 
 
-def test_close_signal(tf):
-    print("TEST CLOSE SIGNAL")
-
-    if len(tf.ac_signal_occurrences) != 2:
-        error("signal wasn't emitted")
-
-    if len(tf.ac_signal_occurrences) == 2 and tf.ac_signal_occurrences[1] != 1:
-        error("signal was emitted with wrong number")
-
-
 def create_problem(p2):
+    randomstring = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(16))
     with open("/usr/bin/true", "r") as bintrue_file:
         description = {"analyzer"    : "problems2testsuite_analyzer",
                        "type"        : "problems2testsuite_type",
                        "reason"      : "Application has been killed",
+                       "duphash"     : randomstring,
+                       "uuid"        : randomstring,
                        "backtrace"   : "die()",
                        "executable"  : "/usr/bin/foo",}
 
@@ -705,20 +717,12 @@ if __name__ == "__main__":
     test_delete_problems(tf)
     test_get_session(tf)
 
-    tf.ac_signal_occurrences = []
-    tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
-
     test_authrorize(tf)
 
-    tf.wait_for_signals(["AuthorizationChanged"])
-
-    test_authrorize_signal(tf)
     test_get_private_problem(tf)
+
     test_close(tf)
 
-    tf.wait_for_signals(["AuthorizationChanged"])
-
-    test_close_signal(tf)
     test_private_problem_not_accessible(tf)
     test_problem_entry_properties(tf)
     test_read_elements(tf)
