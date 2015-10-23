@@ -9,6 +9,8 @@ import pwd
 import socket
 import random
 import string
+import logging
+from functools import partial
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 from contextlib import contextmanager
@@ -41,22 +43,26 @@ class PolkitAuthenticationAgent(dbus.service.Object):
 
     def register(self):
         if not self._authority is None:
-            print("Already registered")
+            logging.error("Polkit AuthenticationAgent : Already registered")
             return
 
         proxy = self._bus.get_object('org.freedesktop.PolicyKit1', '/org/freedesktop/PolicyKit1/Authority')
         authority = dbus.Interface(proxy, dbus_interface='org.freedesktop.PolicyKit1.Authority')
         authority.RegisterAuthenticationAgent(self._subject, "en_US", self._object_path)
 
+        logging.debug("Polkit AuthenticationAgent registered")
+
         self._authority_proxy = proxy
         self._authority = authority
 
     def unregister(self):
         if self._authority is None:
-            print("Not registered")
+            logging.error("Polkit AuthenticationAgent : Not registered")
             return
 
         self._authority.UnregisterAuthenticationAgent(self._subject, self._object_path)
+
+        logging.debug("Polkit AuthenticationAgent unregistered")
 
         self._authority_proxy = None
         self._authority = None
@@ -64,18 +70,40 @@ class PolkitAuthenticationAgent(dbus.service.Object):
     def set_replies(self, replies):
         self._replies = replies
 
+    def _get_authorization_reply(self):
+        if len(self._replies) == 0:
+            logging.warning("Polkit AuthenticationAgent: no reply registered")
+            return False
+
+        cb = self._replies.pop(0)
+        try:
+            return cb()
+        except dbus.exceptions.DBusException as ex:
+            logging.debug("Polkit AuthenticationAgent: callback raised an DBusException: %s" % (str(ex)))
+            raise ex
+        except Exception as ex:
+            logging.exception(str(ex))
+
+        return False
+
     @dbus.service.method(dbus_interface="org.freedesktop.PolicyKit1.AuthenticationAgent",
                          in_signature='sssa{ss}saa{sa{sv}}', out_signature='')
     def BeginAuthentication(self, action_id, message, icon_name, details, cookie, identities):
-        if len(self._replies) == 0 or not self._replies.pop():
+        # all Exceptions in this function are silently ignore
+        logging.debug("Polkit AuthenticationAgent: BeginAuthentication : %s" % (cookie))
+
+        if not self._get_authorization_reply():
+            logging.debug("Dismissed the authorization request")
             raise dbus.exceptions.DBusException("org.freedesktop.PolicyKit1.Error.Cancelled")
 
+        logging.debug("Acknowledged the authorization request")
         self._authority.AuthenticationAgentResponse2(0, cookie, identities[0])
 
     @dbus.service.method(dbus_interface="org.freedesktop.PolicyKit1.AuthenticationAgent",
                          in_signature='s', out_signature='')
     def CancelAuthentication(self, cookie):
-        print("Cancel %s" % (cookie))
+        # all Exceptions in this function are silently ignore
+        logging.warning("Cancel %s" % (cookie))
 
 
 @contextmanager
@@ -104,8 +132,24 @@ class TestFrame(object):
         self.p2 = dbus.Interface(self.p2_proxy, dbus_interface='org.freedesktop.Problems2')
 
         self.ac_signal_occurrences = []
+        self.loop_counter = 0
+        self.loop_running = False
+
+    def main_loop_start(self):
+        self.loop_counter += 1
+        if self.loop_running:
+            return
+
+        self.loop_running = True
+        self.tm = GLib.timeout_add(10000, self.interrupt_waiting)
+        self.loop.run()
 
     def interrupt_waiting(self, emergency=True):
+        self.loop_counter -= 1
+        if not emergency and self.loop_counter != 0:
+            return
+
+        self.loop_running = False
         self.loop.quit()
         if not emergency:
             GLib.Source.remove(self.tm)
@@ -114,6 +158,8 @@ class TestFrame(object):
         if not "AuthorizationChanged" in self.signals:
             return
 
+        logging.debug("Received AuthorizationChanged signal : %d" % (status))
+
         self.interrupt_waiting(False)
         self.ac_signal_occurrences.append(status)
 
@@ -121,13 +167,16 @@ class TestFrame(object):
         if not "Crash" in self.signals:
             return
 
+        logging.debug("Received Crash signal : UID=%s; PATH=%s" % (uid, entry_path))
+
         self.interrupt_waiting(False)
         self.crash_signal_occurrences.append((entry_path, uid))
 
     def wait_for_signals(self, signals):
         self.signals = signals
-        self.tm = GLib.timeout_add(10000, self.interrupt_waiting)
-        self.loop.run()
+        logging.debug("Waiting for signals %s" % (", ".join(signals)))
+        self.main_loop_start()
+
 
 def error(message):
     sys.stderr.write("ERROR: ")
@@ -430,23 +479,60 @@ def test_authrorize(tf):
     tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
 
     with start_polkit_agent(tf.root_bus, tf.bus.get_unique_name()) as pk_agent:
-        pk_agent.set_replies([False, True])
+        def check_pending_authorization(retval):
+            logging.debug("Calling Authorize(): expecting pending")
+            ret = tf.p2_session.Authorize(dict())
+            assert_equals(2, ret, "Not-yet finished authorization request")
+            tf.interrupt_waiting()
+            return retval
+
+        pk_agent.set_replies([partial(check_pending_authorization, False),
+                              partial(check_pending_authorization, True)])
+
+        logging.debug("Calling Authorize(): expecting failure")
 
         ret = tf.p2_session.Authorize(dict())
         assert_equals(1, ret, "Pending authorization request")
 
+        tf.loop_counter += 1
         tf.wait_for_signals(["AuthorizationChanged"])
 
         if assert_true(len(tf.ac_signal_occurrences) == 1, "Pending signal wasn't emitted"):
-            assert_equals(1, tf.ac_signal_occurrences[0], "Pending signal")
+            assert_equals(1, tf.ac_signal_occurrences[0], "Pending signal value")
 
         assert_true(not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"),
                     "Pending authorization request made Session authorized")
 
         tf.wait_for_signals(["AuthorizationChanged"])
 
-        if assert_true(len(tf.ac_signal_occurrences) == 2, "Authorized signal wasn't emitted"):
-            assert_equals(0, tf.ac_signal_occurrences[1], "Authorized signal")
+        if assert_true(len(tf.ac_signal_occurrences) == 2, "Failure signal wasn't emitted"):
+            assert_equals(3, tf.ac_signal_occurrences[1], "Failure signal value")
+
+        assert_true(not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"),
+                    "Failed authorization request made Session authorized")
+
+        logging.debug("Calling Authorize(): expecting success")
+
+        ret = tf.p2_session.Authorize(dict())
+        assert_equals(1, ret, "Pending authorization request")
+
+        tf.loop_counter += 1
+        tf.wait_for_signals(["AuthorizationChanged"])
+
+        if assert_true(len(tf.ac_signal_occurrences) == 3, "Pending signal 2 wasn't emitted"):
+            assert_equals(1, tf.ac_signal_occurrences[2], "Pending signal 2 value")
+
+        assert_true(not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"),
+                    "Pending authorization request 2 made Session authorized")
+
+        tf.wait_for_signals(["AuthorizationChanged"])
+
+        if assert_true(len(tf.ac_signal_occurrences) == 4, "Authorized signal wasn't emitted"):
+            assert_equals(0, tf.ac_signal_occurrences[3], "Authorized signal value")
+
+        assert_true(tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"),
+                    "Authorization request did not make Session authorized")
+
 
 
 def test_close(tf):
@@ -454,12 +540,11 @@ def test_close(tf):
 
     tf.p2_session.Close()
 
+    tf.ac_signal_occurrences = []
     tf.wait_for_signals(["AuthorizationChanged"])
 
-    if len(tf.ac_signal_occurrences) == 3:
-        assert_equals(2, tf.ac_signal_occurrences[2], "Closed session signal")
-    else:
-        error("Closed session signal wasn't emitted")
+    if assert_true(len(tf.ac_signal_occurrences) == 1, "Closed session signal wasn't emitted"):
+        assert_equals(2, tf.ac_signal_occurrences[0], "Closed session signal value")
 
     p2_session_obj = tf.p2.GetSession()
     tf.p2_session_proxy = tf.bus.get_object(BUS_NAME, p2_session_obj)
@@ -762,6 +847,8 @@ if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Pass an uid of non-root user as the first argument!")
         sys.exit(1)
+
+    #logging.getLogger().setLevel(logging.DEBUG)
 
     non_root_uid = int(sys.argv[1])
     tf = TestFrame(non_root_uid)
