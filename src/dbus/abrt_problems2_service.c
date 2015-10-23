@@ -200,6 +200,7 @@ static struct abrt_problems2_object *register_session_object(GDBusConnection *co
 
     if (user != NULL && user->sessions >= g_users_clients_limit)
     {
+        log_warning("User %lu reached the limit of opened sessions (%d)", (long unsigned)caller_uid, g_users_clients_limit);
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                     "Too many sessions opened");
         free(path);

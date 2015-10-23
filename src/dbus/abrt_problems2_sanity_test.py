@@ -4,18 +4,87 @@ import sys
 import time
 import re
 import dbus
+import dbus.service
 import pwd
 import socket
 import random
 import string
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
+from contextlib import contextmanager
 
 BUS_NAME="org.freedesktop.problems"
 
 DBUS_ERROR_BAD_ADDRESS="org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist"
 DBUS_ERROR_ACCESS_DENIED_READ="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to access the problem"
 DBUS_ERROR_ACCESS_DENIED_DELETE="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to delete the problem"
+
+class PolkitAuthenticationAgent(dbus.service.Object):
+    def __init__(self, bus, subject_bus_name):
+        self._object_path = '/org/freedesktop/PolicyKit1/AuthenticationAgent'
+        self._replies = list()
+
+        start_time = "0"
+        with open("/proc/self/stat") as stat:
+            tokens = stat.readline().split(" ")
+            start_time = tokens[21]
+
+        self._bus = bus
+        self._subject = ('unix-process',
+                {'pid' : dbus.types.UInt32(os.getpid()),
+                 'start-time' : dbus.types.UInt64(int(start_time))})
+
+        self._authority_proxy = None
+        self._authority = None
+
+        dbus.service.Object.__init__(self, self._bus, self._object_path)
+
+    def register(self):
+        if not self._authority is None:
+            print("Already registered")
+            return
+
+        proxy = self._bus.get_object('org.freedesktop.PolicyKit1', '/org/freedesktop/PolicyKit1/Authority')
+        authority = dbus.Interface(proxy, dbus_interface='org.freedesktop.PolicyKit1.Authority')
+        authority.RegisterAuthenticationAgent(self._subject, "en_US", self._object_path)
+
+        self._authority_proxy = proxy
+        self._authority = authority
+
+    def unregister(self):
+        if self._authority is None:
+            print("Not registered")
+            return
+
+        self._authority.UnregisterAuthenticationAgent(self._subject, self._object_path)
+
+        self._authority_proxy = None
+        self._authority = None
+
+    def set_replies(self, replies):
+        self._replies = replies
+
+    @dbus.service.method(dbus_interface="org.freedesktop.PolicyKit1.AuthenticationAgent",
+                         in_signature='sssa{ss}saa{sa{sv}}', out_signature='')
+    def BeginAuthentication(self, action_id, message, icon_name, details, cookie, identities):
+        if len(self._replies) == 0 or not self._replies.pop():
+            raise dbus.exceptions.DBusException("org.freedesktop.PolicyKit1.Error.Cancelled")
+
+        self._authority.AuthenticationAgentResponse2(0, cookie, identities[0])
+
+    @dbus.service.method(dbus_interface="org.freedesktop.PolicyKit1.AuthenticationAgent",
+                         in_signature='s', out_signature='')
+    def CancelAuthentication(self, cookie):
+        print("Cancel %s" % (cookie))
+
+
+@contextmanager
+def start_polkit_agent(bus, subject_bus_name):
+    pk_agent = PolkitAuthenticationAgent(bus, subject_bus_name)
+    pk_agent.register()
+    yield pk_agent
+    pk_agent.unregister()
+
 
 class TestFrame(object):
 
@@ -67,8 +136,30 @@ def error(message):
 
 
 def assert_equals(expected, real_value, description="Values are not equal"):
-    if expected != real_value:
-        error("%s: \n\tExpected: %s\n\tGot     : %s\n" % (description, expected, real_value))
+    retval = expected == real_value
+    if not retval:
+        error("%s: \n\tExpected: %s\n\tGot     : %s" % (description, expected, real_value))
+    return retval
+
+
+def assert_not_equals(banned, real_value, description="Value is invalid"):
+    retval = banned != real_value
+    if not retval:
+        error("%s: \n\tMust not be: %s\n" % (description, real_value))
+    return retval
+
+
+def assert_in(e, elements, description="Missing element"):
+    retval = e in elements
+    if not retval:
+        error("%s: \n\tList is missing element: %s" % (description, e))
+    return retval
+
+
+def assert_true(cond, message):
+    if not cond:
+        error(message)
+    return cond
 
 
 def expect_dbus_error(error, method, *args):
@@ -338,25 +429,24 @@ def test_authrorize(tf):
     tf.ac_signal_occurrences = []
     tf.p2_session.connect_to_signal("AuthorizationChanged", tf.handle_authorization_changed)
 
-    ret = tf.p2_session.Authorize(dict())
-    assert_equals(1, ret, "Pending authorization request")
+    with start_polkit_agent(tf.root_bus, tf.bus.get_unique_name()) as pk_agent:
+        pk_agent.set_replies([False, True])
 
-    tf.wait_for_signals(["AuthorizationChanged"])
+        ret = tf.p2_session.Authorize(dict())
+        assert_equals(1, ret, "Pending authorization request")
 
-    if len(tf.ac_signal_occurrences) == 1:
-        assert_equals(1, tf.ac_signal_occurrences[0], "Pending signal")
-    else:
-        error("Pending signal wasn't emitted")
+        tf.wait_for_signals(["AuthorizationChanged"])
 
-    if tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"):
-        error("Pending authorization request made Session authorized")
+        if assert_true(len(tf.ac_signal_occurrences) == 1, "Pending signal wasn't emitted"):
+            assert_equals(1, tf.ac_signal_occurrences[0], "Pending signal")
 
-    tf.wait_for_signals(["AuthorizationChanged"])
+        assert_true(not tf.p2_session_props.Get(tf.p2_session.dbus_interface, "is_authorized"),
+                    "Pending authorization request made Session authorized")
 
-    if len(tf.ac_signal_occurrences) == 2:
-        assert_equals(0, tf.ac_signal_occurrences[1], "Authorized signal")
-    else:
-        error("Authorized signal wasn't emitted")
+        tf.wait_for_signals(["AuthorizationChanged"])
+
+        if assert_true(len(tf.ac_signal_occurrences) == 2, "Authorized signal wasn't emitted"):
+            assert_equals(0, tf.ac_signal_occurrences[1], "Authorized signal")
 
 
 def test_close(tf):
@@ -421,78 +511,47 @@ def test_problem_entry_properties(tf):
     if not re.match("/var/spool/abrt/problems2testsuite_type[^/]*", p2e.getproperty("id")):
         error("strange problem ID")
 
-    if p2e.getproperty("user") != pwd.getpwuid(os.geteuid()).pw_name:
-        error("strange username")
+    assert_equals(pwd.getpwuid(os.geteuid()).pw_name, p2e.getproperty("user"), "User name")
+    assert_equals(socket.gethostname(), p2e.getproperty("hostname"), "hostname")
 
-    if p2e.getproperty("hostname") != socket.gethostname():
-        error("invalid hostname")
-
-    if p2e.getproperty("type") != "problems2testsuite_type":
-        error("invalid type")
-
-    if p2e.getproperty("executable") != "/usr/bin/foo":
-        error("invalid executable")
-
-    if p2e.getproperty("command_line_arguments") != "/usr/bin/foo --blah":
-        error("invalid command_line_arguments")
-
-    if p2e.getproperty("component") != "abrt":
-        error("invalid component")
-
-    if p2e.getproperty("duphash") != "FEDCBA9876543210":
-        error("invalid duphash")
-
-    if p2e.getproperty("uuid") != "0123456789ABCDEF":
-        error("invalid uuid")
-
-    if p2e.getproperty("reason") != "Application has been killed":
-        error("invalid reason")
-
-    if p2e.getproperty("uid") != os.geteuid():
-        error("strange uid")
-
-    if p2e.getproperty("count") != 1:
-        error("count is not 1")
+    assert_equals("problems2testsuite_type", p2e.getproperty("type"), "type")
+    assert_equals("/usr/bin/foo", p2e.getproperty("executable"), "executable")
+    assert_equals("/usr/bin/foo --blah", p2e.getproperty("command_line_arguments"), "command_line_arguments")
+    assert_equals("abrt", p2e.getproperty("component"), "component")
+    assert_equals("FEDCBA9876543210", p2e.getproperty("duphash"), "duphash")
+    assert_equals("0123456789ABCDEF", p2e.getproperty("uuid"), "uuid")
+    assert_equals("Application has been killed", p2e.getproperty("reason"), "reason")
+    assert_equals(os.geteuid(), p2e.getproperty("uid"), "uid")
+    assert_equals(1, p2e.getproperty("count"), "count")
+    assert_equals(p2e.getproperty("last_occurrence"), p2e.getproperty("first_occurrence"), "first_occurrence == last_occurrence")
 
     if abs(p2e.getproperty("first_occurrence") - tf.problem_first_occurrence) >= 5:
         error("too old first occurrence")
 
-    if p2e.getproperty("first_occurrence") != p2e.getproperty("last_occurrence"):
-        error("first_occurrence and last_occurrence differ")
-
     if abs(p2e.getproperty("last_occurrence") - tf.problem_first_occurrence) >= 5:
         error("too old last occurrence")
 
-    if not p2e.getproperty("is_reported"):
-        error("'is_reported' == FALSE but should be reported")
-
-    if not p2e.getproperty("can_be_reported"):
-        error("'cannot be reported' but should be report-able")
-
-    if p2e.getproperty("is_remote"):
-        error("'is_remote' but should not be remote")
+    assert_equals(False, p2e.getproperty("is_reported"), "is_reported")
+    assert_equals(True, p2e.getproperty("can_be_reported"), "can_be_reported")
+    assert_equals(False, p2e.getproperty("is_remote"), "is_reported")
 
     package = p2e.getproperty("package")
-    if len(package) != 5:
-        error("insufficient number of package members")
+    assert_equals(5, len(package), "insufficient number of package members")
 
-    if package != ("problems2-1.2-3", "", "problems2", "1.2", "3"):
-        error("invalid package struct %s" % (str(package)))
+    exp_package = ("problems2-1.2-3", "", "problems2", "1.2", "3")
+    assert_equals(exp_package, package, "invalid package struct")
 
     elements = p2e.getproperty("elements")
-    if len(elements) == 0:
-        error("insufficient number of elements")
+    assert_not_equals(0, len(elements), "Number of elements")
 
     for e in ["analyzer", "type", "reason", "backtrace", "executable", "uuid",
               "duphash", "package", "pkg_name", "pkg_version", "pkg_release",
               "cmdline", "component", "hugetext", "binary", "count", "time"]:
 
-        if not e in elements:
-            error("missing element %s" % (e))
+        assert_in(e, elements, "Property elements")
 
     reports = p2e.getproperty("reports")
-    if len(reports) != 3:
-        error("missing some reports")
+    assert_equals(3, len(reports), "missing reports")
 
     exp = [
         ("ABRT Server", { "BTHASH" : "0123456789ABCDEF", "MSG" : "test"}),
@@ -501,11 +560,8 @@ def test_problem_entry_properties(tf):
         ]
 
     for i in range(0, len(e) - 1):
-        if exp[i][0] != reports[i][0]:
-            error("invalid label %d, %s" % (i, reports[i][0]))
-
-        if exp[i][1] != reports[i][1]:
-            error("invalid value %d, %s" % (i, str(reports[i][1])))
+        assert_equals(exp[i][0], reports[i][0], "invalid reported_to label")
+        assert_equals(exp[i][1], reports[i][1], "invalid reported_to value")
 
 
 def test_read_elements(tf):
@@ -689,6 +745,15 @@ def test_open_too_many_sessions(tf):
         p2s.Close()
 
 
+def test_foreign_session(tf):
+    print("TEST FOREIGN SESSION")
+
+    root_session_proxy = tf.bus.get_object(BUS_NAME, tf.root_p2.GetSession())
+    root_session = dbus.Interface(root_session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
+
+    expect_dbus_error("org.freedesktop.DBus.Error.Failed: Your Problems2 Session is broken. Check system logs for more details.",
+            root_session.Close)
+
 if __name__ == "__main__":
     if os.getuid() != 0:
         print("Run this test under root!")
@@ -730,3 +795,10 @@ if __name__ == "__main__":
     test_delete_elements(tf)
 
     test_open_too_many_sessions(tf)
+    test_foreign_session(tf)
+
+    tf.p2_session.Close()
+
+    root_session_proxy = tf.root_bus.get_object(BUS_NAME, tf.root_p2.GetSession())
+    root_session = dbus.Interface(root_session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
+    root_session.Close()
