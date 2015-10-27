@@ -64,6 +64,11 @@ problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
 
+
+unsigned abrt_problems2_service_elements_limit(uid_t uid);
+
+off_t abrt_problems2_service_dd_size_limit(uid_t uid);
+
 /*
  * Utilities
  */

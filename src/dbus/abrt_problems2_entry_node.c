@@ -122,15 +122,11 @@ problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, ui
 
 static struct p2e_node *get_entry(GDBusConnection *connection,
                           struct abrt_problems2_object *object,
-                          const gchar *caller,
+                          uid_t caller_uid,
                           const gchar *object_path,
                           struct dump_dir **dd,
                           GError **error)
 {
-    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, error);
-    if (caller_uid == (uid_t)-1)
-        return NULL;
-
     struct p2e_node *node = abrt_problems2_object_get_node(object);
     if (node == NULL)
     {
@@ -230,13 +226,36 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-static void handle_SaveElements(struct dump_dir *dd, gint flags,
-                                GVariant *elements, GUnixFDList *fd_list)
+static int handle_SaveElements(struct dump_dir *dd, gint flags,
+                                GVariant *elements, GUnixFDList *fd_list,
+                                uid_t caller_uid, GError **error)
 {
     gchar *name = NULL;
     GVariant *value = NULL;
     GVariantIter iter;
     g_variant_iter_init(&iter, elements);
+
+    /* Implement global size constraints */
+    const int elements_limit = abrt_problems2_service_elements_limit(caller_uid);
+    const off_t dd_size_limit = abrt_problems2_service_dd_size_limit(caller_uid);
+
+    off_t dd_size = dd_compute_size(dd, /*no flags*/0);
+    if (dd_size < 0)
+    {
+        error_msg("Failed to get file system size of dump dir : %s", strerror(-dd_size));
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                "Dump directory file system size");
+        return dd_size;
+    }
+
+    int dd_items = dd_get_items_count(dd);
+    if (dd_items < 0)
+    {
+        error_msg("Failed to get count of dump dir elements: %s", strerror(-dd_items));
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                "Dump directory elements count");
+        return dd_items;
+    }
 
     /* No need to free 'name' and 'container' unless breaking out of the loop */
     while (g_variant_iter_loop(&iter, "{sv}", &name, &value))
@@ -248,11 +267,45 @@ static void handle_SaveElements(struct dump_dir *dd, gint flags,
             continue;
         }
 
+        off_t item_size = 0;
+        if (!dd_exist(dd, name))
+        {
+            if (dd_items >= elements_limit)
+            {
+                error_msg("Cannot create new element '%s': reached the limit for elements %u", name, elements_limit);
+                continue;
+            }
+
+            ++dd_items;
+        }
+        else
+        {
+            item_size = dd_get_item_size(dd, name);
+            if (item_size < 0)
+            {
+                error_msg("Failed to get size of element '%s'", name);
+                continue;
+            }
+        }
+
+        const off_t base_size = dd_size - item_size;
+
         if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
         {
             log_debug("Saving text element");
             const char *data = g_variant_get_string(value, /*length*/NULL);
+            const off_t data_size = strlen(data);
+
+            /* Do not allow dump dir growing in case it already consumes
+             * more than the limit */
+            if (data_size > item_size && base_size + data_size > dd_size_limit)
+            {
+                error_msg("Cannot save text element: problem data size limit %ld", dd_size_limit);
+                continue;
+            }
+
             dd_save_text(dd, name, data);
+            dd_size = base_size + data_size;
         }
         else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
         {
@@ -267,12 +320,33 @@ static void handle_SaveElements(struct dump_dir *dd, gint flags,
                 continue;
             }
 
-            dd_copy_fd(dd, name, fd);
+            /* Do not allow dump dir growing */
+            const off_t max_size = base_size > dd_size_limit ? item_size : dd_size_limit - base_size;
+            const off_t r = dd_copy_fd(dd, name, fd, /*copy_flags*/0, max_size);
             close(fd);
+
+            if (r < 0)
+            {
+                error_msg("Failed to save file descriptor");
+                continue;
+            }
+
+            if (r >= max_size)
+            {
+                /* TODO: add error return message */
+                error_msg("File descriptor was truncated due to size limit");
+
+                /* the file has been created and its size is 'max_size' */
+                dd_size = base_size + max_size;
+            }
+            else
+                dd_size = base_size + r ;
         }
         else
             error_msg("Unsupported type: %s", g_variant_get_type_string(value));
     }
+
+    return 0;
 }
 
 static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
@@ -309,8 +383,16 @@ static void dbus_method_call(GDBusConnection *connection,
     log_debug("Problems2.Entry method : %s", method_name);
 
     GError *error = NULL;
+    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    if (caller_uid == (uid_t)-1)
+    {
+        g_dbus_method_invocation_return_gerror(invocation, error);
+        g_error_free(error);
+        return;
+    }
+
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, &error);
+    struct p2e_node *node = get_entry(connection, user_data, caller_uid, object_path, &dd, &error);
     if (node == NULL)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -374,8 +456,14 @@ static void dbus_method_call(GDBusConnection *connection,
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        handle_SaveElements(dd, flags, elements, fd_list);
-        g_dbus_method_invocation_return_value(invocation, NULL);
+        int r = handle_SaveElements(dd, flags, elements, fd_list, caller_uid, &error);
+        if (r != 0)
+        {
+            g_dbus_method_invocation_return_gerror(invocation, error);
+            g_error_free(error);
+        }
+        else
+            g_dbus_method_invocation_return_value(invocation, NULL);
 
         g_variant_unref(elements);
         dd_close(dd);
@@ -441,9 +529,13 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 {
     log_debug("Problems2.Entry get property : %s", property_name);
 
+    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, error);
+    if (caller_uid == (uid_t)-1)
+        return NULL;
+
     GVariant *retval;
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, error);
+    struct p2e_node *node = get_entry(connection, user_data, caller_uid, object_path, &dd, error);
     if (node == NULL)
         return NULL;
 
@@ -596,6 +688,10 @@ static gboolean dbus_set_property(GDBusConnection *connection,
                         gpointer    user_data)
 {
     log_debug("Problems2.Entry set property : %s", property_name);
+
+    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, error);
+    if (caller_uid == (uid_t)-1)
+        return FALSE;
 
     struct dump_dir *dd;
     struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, error);

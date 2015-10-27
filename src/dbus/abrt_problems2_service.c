@@ -595,3 +595,13 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+
+unsigned abrt_problems2_service_elements_limit(uid_t uid)
+{
+    return 100;
+}
+
+off_t abrt_problems2_service_dd_size_limit(uid_t uid)
+{
+    return uid == 0 ? 0 : 2L*1024L*1024L*1024L;
+}
