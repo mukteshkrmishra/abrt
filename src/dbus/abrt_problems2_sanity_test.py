@@ -10,6 +10,7 @@ import socket
 import random
 import string
 import logging
+import subprocess
 from functools import partial
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
@@ -20,6 +21,9 @@ BUS_NAME="org.freedesktop.problems"
 DBUS_ERROR_BAD_ADDRESS="org.freedesktop.DBus.Error.BadAddress: Requested Entry does not exist"
 DBUS_ERROR_ACCESS_DENIED_READ="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to access the problem"
 DBUS_ERROR_ACCESS_DENIED_DELETE="org.freedesktop.DBus.Error.AccessDenied: You are not authorized to delete the problem"
+
+DBUS_LIMIT_ELEMENTS_COUNT = 100
+DBUS_LIMIT_DATA_SIZE = 2 * 1024 * 1024 * 1024
 
 class PolkitAuthenticationAgent(dbus.service.Object):
     def __init__(self, bus, subject_bus_name):
@@ -198,11 +202,25 @@ def assert_not_equals(banned, real_value, description="Value is invalid"):
     return retval
 
 
+def assert_lower_than(expected, real_value, description="Value should be lower"):
+    retval = expected > real_value
+    if not retval:
+        error("%s: \n\tExpected: %s\n\tGot     : %s" % (description, expected, real_value))
+    return retval
+
+
 def assert_in(e, elements, description="Missing element"):
     retval = e in elements
     if not retval:
         error("%s: \n\tList is missing element: %s" % (description, e))
     return retval
+
+
+def assert_not_in(e, elements, description="Missing element"):
+    retval = e in elements
+    if retval:
+        error("%s: \n\tList is contains element: %s" % (description, e))
+    return not retval
 
 
 def assert_true(cond, message):
@@ -211,12 +229,18 @@ def assert_true(cond, message):
     return cond
 
 
-def expect_dbus_error(error, method, *args):
+def assert_false(cond, message):
+    return assert_true(not cond, message)
+
+
+def expect_dbus_error(error_msg, method, *args):
+    retval = None
     try:
-        method(*args)
-        error("Expected D-Bus error: %s" % (error))
+        retval = method(*args)
+        error("Expected D-Bus error: %s" % (error_msg))
+        return (False, None)
     except dbus.exceptions.DBusException as ex:
-        assert_equals(error, str(ex), "Exception has invalid text")
+        return (assert_equals(error_msg, str(ex), "Exception has invalid text"), retval)
 
 
 def dictionary_key_has_value(dictionary, key, expected):
@@ -260,6 +284,7 @@ def test_not_allowed_elements(tf):
                           tf.p2.NewProblem, description)
 
     pr_id = tf.root_p2.NewProblem(description)
+    time.sleep(1)
     if not pr_id:
         error("root is not allowed to create type=CCpp")
 
@@ -295,6 +320,7 @@ def test_real_problem(tf):
 
             tf.problem_first_occurrence = time.time()
             tf.problem_id = tf.p2.NewProblem(description)
+            time.sleep(1)
             if not tf.problem_id:
                 error("empty return value")
 
@@ -418,12 +444,15 @@ def test_delete_problems(tf):
 
     description["duphash"] = description["uuid"] = "DEADBEEF"
     one = tf.p2.NewProblem(description)
+    time.sleep(1)
 
     description["duphash"] = description["uuid"] = "81680083"
     two = tf.p2.NewProblem(description)
+    time.sleep(1)
 
     description["duphash"] = description["uuid"] = "FFFFFFFF"
     three = tf.p2.NewProblem(description)
+    time.sleep(1)
 
     p = tf.p2.GetProblems()
     if not(one in p and two in p and three in p):
@@ -557,16 +586,18 @@ def test_close(tf):
 
 def create_problem(p2):
     randomstring = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(16))
-    with open("/usr/bin/true", "r") as bintrue_file:
-        description = {"analyzer"    : "problems2testsuite_analyzer",
-                       "type"        : "problems2testsuite_type",
-                       "reason"      : "Application has been killed",
-                       "duphash"     : randomstring,
-                       "uuid"        : randomstring,
-                       "backtrace"   : "die()",
-                       "executable"  : "/usr/bin/foo",}
+    description = {"analyzer"    : "problems2testsuite_analyzer",
+                   "type"        : "problems2testsuite_type",
+                   "reason"      : "Application has been killed",
+                   "duphash"     : randomstring,
+                   "uuid"        : randomstring,
+                   "backtrace"   : "die()",
+                   "executable"  : "/usr/bin/foo",}
 
-        return p2.NewProblem(description)
+    p2p = p2.NewProblem(description)
+    time.sleep(1)
+
+    return p2p
 
 
 class Problems2Entry(object):
@@ -839,6 +870,129 @@ def test_foreign_session(tf):
     expect_dbus_error("org.freedesktop.DBus.Error.Failed: Your Problems2 Session is broken. Check system logs for more details.",
             root_session.Close)
 
+
+def test_new_problem_elements_count_limit(tf):
+    print("TEST NEW PROBLEM ELEMENTS COUNT LIMIT")
+
+    too_many_elements = dict()
+    for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
+        too_many_elements[str(i)] = str(i)
+
+    retval, pp = expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements",
+                    tf.p2.NewProblem, too_many_elements)
+
+    if not assert_false(retval, "NewProblem returns an error for too many elements"):
+        try:
+            tf.p2.DeleteProblems([pp])
+        except dbus.exceptions.DBusException as ex:
+            print("Failed to remove elements count test problem: %s" % (str(ex)))
+
+
+def test_save_elements_count_limit(tf):
+    print("TEST SAVE ELEMENTS COUNT LIMIT")
+
+    problem_path = create_problem(tf.p2)
+    entry = Problems2Entry(tf.bus, problem_path)
+
+    too_many_elements = dict()
+    for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
+        too_many_elements[str(i)] = str(i)
+
+    entry.SaveElements(too_many_elements, 0)
+    elements = entry.getproperty("elements")
+    saved = False
+    ignored = False
+    for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
+        if str(i) in elements:
+            saved = True
+        else:
+            ignored = True
+
+    assert_true(saved, "SaveElements: saved as many as possible")
+    assert_true(ignored, "SaveElements: did not save elements over limit")
+
+    for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
+        key = str(DBUS_LIMIT_ELEMENTS_COUNT + 1 + i)
+        ed = { key : str(i + 1) }
+        try:
+            entry.SaveElements(ed, 0)
+            data = entry.ReadElements([key], 0)
+        except dbus.exceptions.DBusException as ex:
+            print (key)
+            raise ex
+        assert_not_in(key, data, "SaveElements: did not create new elements")
+
+    overwrites = False
+    for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
+        ed = { str(i) : str(i + 2) }
+        try:
+            entry.SaveElements(ed, 0)
+            overwrites = True
+        except dbus.exceptions.DBusException as ex:
+            if not assert_equals("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements", str(ex)):
+                break
+
+    assert_true(overwrites, "SaveElements allows to overwrite element despite Elements count limit")
+
+    tf.p2.DeleteProblems([problem_path])
+
+
+def get_huge_file_path(tf):
+    huge_file_path = "/var/tmp/abrt.testsuite.huge-file"
+    try:
+        size = os.path.getsize(huge_file_path)
+        if size < DBUS_LIMIT_DATA_SIZE + 1024:
+            raise OSError
+    except OSError:
+        subprocess.call(['dd', 'bs=1024', 'count=' + str(int(DBUS_LIMIT_DATA_SIZE/1024) + 1), 'if=/dev/urandom', 'of=' + huge_file_path])
+
+    return huge_file_path
+
+
+def test_new_problem_data_size_limit(tf):
+    print("TEST NEW PROBLEM DATA SIZE LIMIT")
+
+    huge_file_path = get_huge_file_path(tf)
+
+    with open(huge_file_path, "r") as huge_file:
+        description = {"analyzer"    : "problems2testsuite_analyzer",
+                       "reason"      : "Application has been killed",
+                       "backtrace"   : "die()",
+                       "duphash"     : "FAKE_BINARY_TYPE",
+                       "uuid"        : "FAKE_BINARY_TYPE",
+                       "huge_file"   : dbus.types.UnixFd(huge_file),
+                       "executable"  : "/usr/bin/foo",
+                       "type"        : "abrt-problems2-sanity"}
+
+        expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too big data",
+                              tf.p2.NewProblem, description)
+
+
+def test_save_elements_data_size_limit(tf):
+    print("TEST SAVE ELEMENTS DATA SIZE LIMIT")
+
+    huge_file_path = get_huge_file_path(tf)
+
+    problem_path = create_problem(tf.p2)
+    entry = Problems2Entry(tf.bus, problem_path)
+
+    key = "huge_file"
+    with open(huge_file_path, "r") as huge_file:
+        entry.SaveElements({key : dbus.types.UnixFd(huge_file)}, 0)
+        data = entry.ReadElements([key], 0x1)
+        if assert_in(key, data, "SaveElements: created truncated file"):
+            fd = data[key].take()
+            end = os.lseek(fd, 0, os.SEEK_END)
+            os.close(fd)
+            assert_lower_than(DBUS_LIMIT_DATA_SIZE, end, "SaveElements: wrote up to Size limit Bytes")
+
+    smaller_ed = {key : "smaller file"}
+    entry.SaveElements(smaller_ed, 0)
+    data = entry.ReadElements([key], 0x4)
+    if assert_in(key, data, "SaveElements: created non-text file"):
+        assert_equals(smaller_ed[key], data[key], "SaveElements: dump directory does not grow")
+
+
 if __name__ == "__main__":
     if os.getuid() != 0:
         print("Run this test under root!")
@@ -883,6 +1037,12 @@ if __name__ == "__main__":
 
     test_open_too_many_sessions(tf)
     test_foreign_session(tf)
+
+    test_new_problem_elements_count_limit(tf)
+    test_save_elements_count_limit(tf)
+
+    test_new_problem_data_size_limit(tf)
+    test_save_elements_data_size_limit(tf)
 
     tf.p2_session.Close()
 
