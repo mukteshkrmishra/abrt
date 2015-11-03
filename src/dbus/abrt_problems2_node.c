@@ -8,6 +8,22 @@
 
 #define STRINGIZE(literal) #literal
 
+
+static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
+{
+    gchar *name = NULL;
+    GVariant *value = NULL;
+    GVariantIter iter;
+    g_variant_iter_init(&iter, dict);
+
+    GList *retval = NULL;
+    /* No need to free 'name' and 'container' unless breaking out of the loop */
+    while (g_variant_iter_loop(&iter, "{sv}", &name, &value))
+        retval = g_list_prepend(retval, xstrdup(name));
+
+    return retval;
+}
+
 static const char *handle_NewProblem(GDBusConnection *connection,
                                      GVariant *problem_info,
                                      uid_t caller_uid,
@@ -16,76 +32,111 @@ static const char *handle_NewProblem(GDBusConnection *connection,
 {
     char *problem_id = NULL;
     const char *new_path = NULL;
-    problem_data_t *pd = problem_data_new();
 
-    gchar *key;
-    GVariant *value;
-    GVariantIter iter;
-    g_variant_iter_init(&iter, problem_info);
-    while (g_variant_iter_loop(&iter, "{sv}", &key, &value))
+    GVariantDict pd;
+    g_variant_dict_init(&pd, problem_info);
+
+    /* Re-implement problem_data_add_basics(problem_info); - I don't want to
+     * convert GVariant* to problem_data_t and back.
+     *
+     * The problem data should be converted to some kind of interface!
+     */
+    char *analyzer_str = NULL;
+    GVariant *analyzer_element = g_variant_dict_lookup_value(&pd, FILENAME_ANALYZER, G_VARIANT_TYPE_STRING);
+    if (analyzer_element == NULL)
     {
-        if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
-        {
-            log_debug("New string: %s", key);
-            const char *real_value = g_variant_get_string(value, /*ignore length*/NULL);
-            if (allowed_new_user_problem_entry(caller_uid, key, real_value) == false)
-            {
-                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                            "You are not allowed to create element '%s' containing '%s'",
-                            key, real_value);
-                goto exit_loop_on_error;
-            }
-
-            problem_data_add_text_editable(pd, key, real_value);
-        }
-        else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
-        {
-            log_debug("New file descriptor: %s", key);
-
-            if (problem_entry_is_post_create_condition(key))
-            {
-                log_debug("post-create element as File handle: %s", key);
-                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                            "Element '%s' must be of '%s' D-Bus type",
-                            key, g_variant_type_peek_string(G_VARIANT_TYPE_STRING));
-                goto exit_loop_on_error;
-            }
-
-            gint handle = g_unix_fd_list_get(fd_list, g_variant_get_handle(value), error);
-            if (handle < 0)
-                goto exit_loop_on_error;
-
-            problem_data_add_file_descriptor(pd, key, handle);
-        }
-        continue;
-
-exit_loop_on_error:
-        g_free(key);
-        g_variant_unref(value);
-        goto finito;
+        analyzer_str = xstrdup("libreport");
+        g_variant_dict_insert(&pd, FILENAME_ANALYZER, "s", analyzer_str);
+    }
+    else
+    {
+        analyzer_str = xstrdup(g_variant_get_string(analyzer_element, NULL));
+        g_variant_unref(analyzer_element);
     }
 
-    if (caller_uid != 0 || problem_data_get_content_or_NULL(pd, FILENAME_UID) == NULL)
+    char *type_str = NULL;
+    GVariant *type_element = g_variant_dict_lookup_value(&pd, FILENAME_TYPE, G_VARIANT_TYPE_STRING);
+    if (type_element == NULL)
+    {
+         type_str = xstrdup(analyzer_str);
+    }
+    else
+    {
+         type_str = xstrdup(g_variant_get_string(type_element, NULL));
+         g_variant_unref(type_element);
+    }
+
+    GVariant *uuid_element = g_variant_dict_lookup_value(&pd, FILENAME_UUID, G_VARIANT_TYPE_STRING);
+    if (uuid_element == NULL)
+    {
+        GVariant *duphash_element = g_variant_dict_lookup_value(&pd, FILENAME_DUPHASH, G_VARIANT_TYPE_STRING);
+        if (duphash_element != NULL)
+        {
+            g_variant_dict_insert_value(&pd, FILENAME_UUID, duphash_element);
+            g_variant_unref(duphash_element);
+        }
+        else
+        {
+            /* start hash */
+            sha1_ctx_t sha1ctx;
+            sha1_begin(&sha1ctx);
+
+            /*
+             * To avoid spurious hash differences, sort keys so that elements are
+             * always processed in the same order:
+             */
+            GList *list = abrt_g_variant_get_dict_keys(problem_info);
+            list = g_list_sort(list, (GCompareFunc)strcmp);
+            for (GList *l = list; l != NULL; l = g_list_next(l))
+            {
+                GVariant *element = g_variant_dict_lookup_value(&pd, (const char *)l->data, G_VARIANT_TYPE_STRING);
+                /* do not hash items which are binary or file descriptor */
+                if (element == NULL)
+                    continue;
+
+                gsize size = 0;
+                const char *content = g_variant_get_string(element, &size);
+                sha1_hash(&sha1ctx, content, size);
+            }
+            g_list_free_full(list, free);
+
+            /* end hash */
+            char hash_bytes[SHA1_RESULT_LEN];
+            sha1_end(&sha1ctx, hash_bytes);
+            char hash_str[SHA1_RESULT_LEN*2 + 1];
+            bin2hex(hash_str, hash_bytes, SHA1_RESULT_LEN)[0] = '\0';
+
+            g_variant_dict_insert(&pd, FILENAME_UUID, "s", hash_str);
+        }
+    }
+
+    /* Sanitize UID
+     */
+    GVariant *uid_element =  g_variant_dict_lookup_value(&pd, FILENAME_UID, G_VARIANT_TYPE_STRING);
+    char *uid_str = NULL;
+    if (caller_uid != 0 || uid_element == NULL)
     {   /* set uid field to caller's uid if caller is not root or root doesn't pass own uid */
-        log_info("Adding UID %d to problem data", caller_uid);
-        char buf[sizeof(uid_t) * 3 + 2];
-        snprintf(buf, sizeof(buf), "%d", caller_uid);
-        problem_data_add_text_noteditable(pd, FILENAME_UID, buf);
+        log_info("Adding UID %lu to the problem info", (long unsigned)caller_uid);
+        uid_str = xasprintf("%lu", (long unsigned)caller_uid);
+        g_variant_dict_insert(&pd, FILENAME_UID, "s", uid_str);
     }
+    else
+        uid_str = xstrdup(g_variant_get_string(uid_element, NULL));
 
-    /* At least it should generate local problem identifier UUID */
-    problem_data_add_basics(pd);
+    if (uid_element != NULL)
+        g_variant_unref(uid_element);
 
-    new_path = abrt_problems2_service_save_problem(connection, pd, &problem_id);
+    GVariant *real_problem_info = g_variant_dict_end(&pd);
+
+    new_path = abrt_problems2_service_save_problem(connection, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
+
+    g_variant_unref(real_problem_info);
+    free(type_str);
+    free(analyzer_str);
 
     if (problem_id)
         notify_new_path(problem_id);
-    else
-        g_set_error_literal(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                            "Failed to create new problem");
 
-finito:
-    problem_data_free(pd);
     free(problem_id);
     return new_path;
 }

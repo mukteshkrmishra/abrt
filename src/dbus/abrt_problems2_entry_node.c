@@ -226,10 +226,12 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-static int handle_SaveElements(struct dump_dir *dd, gint flags,
+int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
                                 GVariant *elements, GUnixFDList *fd_list,
                                 uid_t caller_uid, GError **error)
 {
+    int retval = 0;
+
     gchar *name = NULL;
     GVariant *value = NULL;
     GVariantIter iter;
@@ -264,15 +266,20 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
         if (!str_is_correct_filename(name))
         {
             error_msg("Attempt to save prohibited data: '%s'", name);
-            continue;
+            g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
+                    "Not allowed problem element name");
+            retval = -EACCES;
+            goto exit_loop_on_error;
         }
 
         off_t item_size = 0;
         if (!dd_exist(dd, name))
         {
-            if (dd_items >= elements_limit)
+            if (elements_limit != 0 && dd_items >= elements_limit)
             {
                 error_msg("Cannot create new element '%s': reached the limit for elements %u", name, elements_limit);
+                if (flags & P2E_ELEMENTS_COUNT_LIMIT_FATAL)
+                    goto exit_loop_on_too_many_elements;
                 continue;
             }
 
@@ -284,6 +291,13 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
             if (item_size < 0)
             {
                 error_msg("Failed to get size of element '%s'", name);
+                if (flags & P2E_IO_ERROR_FATAL)
+                {
+                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to get size of underlying data");
+                    retval = item_size;
+                    goto exit_loop_on_error;
+                }
                 continue;
             }
         }
@@ -296,11 +310,25 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
             const char *data = g_variant_get_string(value, /*length*/NULL);
             const off_t data_size = strlen(data);
 
+            if (allowed_new_user_problem_entry(caller_uid, name, data) == false)
+            {
+                error_msg("Not allowed for user %lu: %s = %s", (long unsigned)caller_uid, name, data);
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "You are not allowed to create element '%s' containing '%s'",
+                            name, data);
+                retval = -EPERM;
+                goto exit_loop_on_error;
+            }
+
             /* Do not allow dump dir growing in case it already consumes
              * more than the limit */
-            if (data_size > item_size && base_size + data_size > dd_size_limit)
+            if (   dd_size_limit != 0
+                && data_size > item_size
+                && base_size + data_size > dd_size_limit)
             {
                 error_msg("Cannot save text element: problem data size limit %ld", dd_size_limit);
+                if (flags & P2E_DATA_SIZE_LIMIT_FATAL)
+                    goto exit_loop_on_too_big_data;
                 continue;
             }
 
@@ -310,13 +338,30 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
         else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
         {
             log_debug("Saving data from file descriptor");
+
+            if (problem_entry_is_post_create_condition(name))
+            {
+                error_msg("post-create element as file descriptor: %s", name);
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "Element '%s' must be of '%s' D-Bus type",
+                            name, g_variant_type_peek_string(G_VARIANT_TYPE_STRING));
+                retval = -EINVAL;
+                goto exit_loop_on_error;
+            }
+
             gint32 handle = g_variant_get_handle(value);
 
-            GError *error = NULL;
-            int fd = g_unix_fd_list_get(fd_list, handle, &error);
-            if (error != NULL)
+            int fd = g_unix_fd_list_get(fd_list, handle, error);
+            if (*error != NULL)
             {
-                error_msg("Failed to get file descriptor of %s: %s", name, error->message);
+                error_msg("Failed to get file descriptor of %s: %s", name, (*error)->message);
+                if (flags & P2E_IO_ERROR_FATAL)
+                {
+                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to get passed file descriptor");
+                    retval = -EIO;
+                    goto exit_loop_on_error;
+                }
                 continue;
             }
 
@@ -328,13 +373,21 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
             if (r < 0)
             {
                 error_msg("Failed to save file descriptor");
+                if (flags & P2E_IO_ERROR_FATAL)
+                {
+                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to save data of passed file descriptor");
+                    retval = r;
+                    goto exit_loop_on_error;
+                }
                 continue;
             }
 
             if (r >= max_size)
             {
-                /* TODO: add error return message */
                 error_msg("File descriptor was truncated due to size limit");
+                if (flags & P2E_DATA_SIZE_LIMIT_FATAL)
+                    goto exit_loop_on_too_big_data;
 
                 /* the file has been created and its size is 'max_size' */
                 dd_size = base_size + max_size;
@@ -343,10 +396,32 @@ static int handle_SaveElements(struct dump_dir *dd, gint flags,
                 dd_size = base_size + r ;
         }
         else
+        {
             error_msg("Unsupported type: %s", g_variant_get_type_string(value));
+            if (flags & P2E_IO_ERROR_FATAL)
+            {
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED,
+                        "Not supported D-Bus type");
+                retval = -ENOTSUP;
+                goto exit_loop_on_error;
+            }
+        }
     }
 
     return 0;
+
+exit_loop_on_too_big_data:
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+            "Problem data is too big");
+    return -EFBIG;
+
+exit_loop_on_too_many_elements:
+    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+            "Too many elements");
+    return -E2BIG;
+
+exit_loop_on_error:
+    return retval;
 }
 
 static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
@@ -456,7 +531,7 @@ static void dbus_method_call(GDBusConnection *connection,
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        int r = handle_SaveElements(dd, flags, elements, fd_list, caller_uid, &error);
+        int r = abrt_problems2_entry_save_elements(dd, flags, elements, fd_list, caller_uid, &error);
         if (r != 0)
         {
             g_dbus_method_invocation_return_gerror(invocation, error);

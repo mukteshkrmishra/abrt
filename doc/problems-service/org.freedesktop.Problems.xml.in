@@ -34,9 +34,13 @@
                         A dictionary describing problem where values are either file descriptors or strings. There are few commonly recognized fields but the dictionary can hold anything you need.
                         <variablelist>
                             <varlistentry>
+                                <term>type</term>
+                                <listitem>
+                                    <para>This field should be always present. The field defines a type of problem. If the item is not provided, <emphasis role="bold">libreport</emphasis> string is used by default. This element must not be passed as plain String. Some values can passed only by authorized users, check the implementation details to find the real values.</para>
+                                </listitem>
                                 <term>analyzer</term>
                                 <listitem>
-                                    <para>This field should be always present. The field defines a type of problem. If the item is not provided, <emphasis role="bold">libreport</emphasis> string is used by default.</para>
+                                    <para>This field should be always present. The field defines a type of problem. If the item is not provided, <emphasis role="bold">libreport</emphasis> string is used by default. This element must not be passed as plain String. Some values can passed only by authorized users, check the implementation details to find the real values.</para>
                                 </listitem>
                             </varlistentry>
                             <varlistentry>
@@ -726,7 +730,7 @@ for prblmprx in problems.GetProblems():
             </method>
 
             <method name='SaveElements'>
-                <tp:docstring>Creates or updates raw values of the given problem elements</tp:docstring>
+                <tp:docstring>Creates or updates raw values of the given problem elements. See org.freedesktop.Problems2.NewProblem for more details about element naming rules.</tp:docstring>
 
                 <arg type='a{sv}' name='elements' direction='in'>
                     <tp:docstring>The problem elements and their values of one of the fllowing types:
@@ -748,7 +752,25 @@ for prblmprx in problems.GetProblems():
                 </arg>
 
                 <arg type='i' name='flags' direction='in'>
-                    <tp:docstring>This argument can be used in future to allow the caller to choose whether he want to append the elements or truncate them.</tp:docstring>
+                    <tp:docstring>This argument is used to define how to recover from errors.</tp:docstring>
+                    <variablelist>
+                        <varlistentry>
+                            <term>1</term>
+                            <listitem><para>Fatal IO errors</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>2</term>
+                            <listitem><para>Fatal Unsupported data type errors</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>4</term>
+                            <listitem><para>Fatal Problem elements count limit</para></listitem>
+                        </varlistentry>
+                        <varlistentry>
+                            <term>8</term>
+                            <listitem><para>Fatal Problem data size limit</para></listitem>
+                        </varlistentry>
+                    </variablelist>
                 </arg>
             </method>
 

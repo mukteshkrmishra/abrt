@@ -32,4 +32,24 @@ problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, ui
 
 GDBusInterfaceVTable *abrt_problems2_entry_node_vtable(void);
 
+
+/*
+ * Utility functions
+ */
+enum p2e_save_elements_flags
+{
+    P2E_IO_ERROR_FATAL             = (1 << 0),
+    P2E_UNSUPPORTED_ERROR_FATAL    = (1 << 1),
+    P2E_ELEMENTS_COUNT_LIMIT_FATAL = (1 << 2),
+    P2E_DATA_SIZE_LIMIT_FATAL      = (1 << 3),
+
+    P2E_ALL_FATAL =(  P2E_IO_ERROR_FATAL
+                    | P2E_UNSUPPORTED_ERROR_FATAL
+                    | P2E_ELEMENTS_COUNT_LIMIT_FATAL
+                    | P2E_DATA_SIZE_LIMIT_FATAL),
+};
+
+int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
+        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid, GError **error);
+
 #endif/*ABRT_PROBLEMS2_ENTRY_NODE_H*/

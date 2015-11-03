@@ -386,30 +386,51 @@ void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
     }
 }
 
-const char *abrt_problems2_service_save_problem(GDBusConnection *connection,
-        problem_data_t *pd,
-        char **problem_id)
+struct save_problem_args
 {
-    char *new_problem_id = problem_data_save(pd);
+    GVariant *problem_info;
+    GUnixFDList *fd_list;
+    uid_t caller_uid;
+    GError **error;
+};
 
-    if (new_problem_id == NULL)
+static int wrapped_abrt_problems2_entry_save_elements(struct dump_dir *dd,
+        struct save_problem_args *args)
+{
+    return abrt_problems2_entry_save_elements(dd, P2E_ALL_FATAL, args->problem_info,
+                  args->fd_list, args->caller_uid, args->error);
+}
+
+const char *abrt_problems2_service_save_problem(GDBusConnection *connection,
+        const char *type_str, GVariant *problem_info, GUnixFDList *fd_list,
+        uid_t caller_uid, char **problem_id, GError **error)
+{
+    struct save_problem_args args = {
+        .problem_info = problem_info,
+        .fd_list = fd_list,
+        .caller_uid = caller_uid,
+        .error = error,
+    };
+
+    struct dump_dir *dd = create_dump_dir(g_settings_dump_location, type_str, /*fs owner*/0,
+                            (save_data_call_back)wrapped_abrt_problems2_entry_save_elements, (void *)&args);
+
+    if (dd == NULL)
         return NULL;
 
-    const char *entry_node_path = register_dump_dir_entry_node(connection, new_problem_id);
+    const char *entry_node_path = register_dump_dir_entry_node(connection, dd->dd_dirname);
 
     if (entry_node_path != NULL)
     {
         if (problem_id != NULL)
-            *problem_id = new_problem_id;
-        else
-            free(new_problem_id);
+            *problem_id = xstrdup(dd->dd_dirname);
 
-        char *uid_str = problem_data_get_content_or_NULL(pd, FILENAME_UID);
-        int uid = uid_str != NULL ? atoi(uid_str) : 0;
-        GVariant *parameters = g_variant_new("(oi)", entry_node_path, uid);
-
+        uid_t uid = dd_get_owner(dd);
+        GVariant *parameters = g_variant_new("(oi)", entry_node_path, (gint32)uid);
         abrt_problems2_object_emit_signal(g_problems2_object, "Crash", parameters, connection);
     }
+
+    dd_close(dd);
 
     return entry_node_path;
 }

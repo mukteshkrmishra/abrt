@@ -118,6 +118,25 @@ def start_polkit_agent(bus, subject_bus_name):
     pk_agent.unregister()
 
 
+class Problems2Entry(object):
+
+    def __init__(self, bus, entry_path):
+        entry_proxy = bus.get_object(BUS_NAME, entry_path)
+        self._properties = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.DBus.Properties")
+        self._entry = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.Problems2.Entry")
+
+    def __getattribute__(self, name):
+        try:
+            return object.__getattribute__(self, name)
+        except AttributeError:
+            entry = object.__getattribute__(self, "_entry")
+            return entry.get_dbus_method(name)
+
+    def getproperty(self, name):
+        properties = object.__getattribute__(self, "_properties")
+        return properties.Get("org.freedesktop.Problems2.Entry", name)
+
+
 class TestFrame(object):
 
     def __init__(self, non_root_uid):
@@ -135,9 +154,13 @@ class TestFrame(object):
         self.p2_proxy = self.bus.get_object(BUS_NAME, '/org/freedesktop/Problems2')
         self.p2 = dbus.Interface(self.p2_proxy, dbus_interface='org.freedesktop.Problems2')
 
+        self.p2_session = None
+
         self.ac_signal_occurrences = []
         self.loop_counter = 0
         self.loop_running = False
+        self.tm = -1
+        self.signals = []
 
     def main_loop_start(self):
         self.loop_counter += 1
@@ -323,6 +346,47 @@ def test_real_problem(tf):
             time.sleep(1)
             if not tf.problem_id:
                 error("empty return value")
+
+
+def test_new_problem_sanitized_uid(tf):
+    print("TEST SANITIZED UUID")
+
+    description = {"analyzer"    : "problems2testsuite_analyzer",
+                   "type"        : "sanitized-uid",
+                   "uid"         : "0",
+                   "reason"      : "Application has been killed",
+                   "duphash"     : "SANITIZED_UID",
+                   "backtrace"   : "die()",
+                   "executable"  : "/usr/bin/foo" }
+
+    pr_id = tf.p2.NewProblem(description)
+    time.sleep(1)
+    assert_true(pr_id, "Failed to create problem with uid 0")
+
+    p2e = Problems2Entry(tf.bus, pr_id)
+    assert_equals(os.geteuid(), p2e.getproperty("uid"), "Sanitized UID")
+
+    tf.p2.DeleteProblems([pr_id])
+
+
+def test_new_problem_sanitized_elements(tf):
+    print("TEST SANITIZED ELEMENTS")
+
+    description = {}
+
+    pr_id = tf.p2.NewProblem(description)
+    time.sleep(1)
+    assert_true(pr_id, "Failed to create problem without elements")
+
+    p2e = Problems2Entry(tf.bus, pr_id)
+    assert_equals("libreport", p2e.getproperty("type"), "Created type")
+    assert_true(p2e.getproperty("uuid"), "Created UUID")
+
+    resp = p2e.ReadElements(["analyzer"], 0)
+    if assert_in("analyzer", resp, "Created analyzer element"):
+        assert_equals("libreport", resp["analyzer"])
+
+    tf.p2.DeleteProblems([pr_id])
 
 
 def test_crash_signal(tf):
@@ -600,25 +664,6 @@ def create_problem(p2):
     return p2p
 
 
-class Problems2Entry(object):
-
-    def __init__(self, bus, entry_path):
-        entry_proxy = bus.get_object(BUS_NAME, entry_path)
-        self._properties = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.DBus.Properties")
-        self._entry = dbus.Interface(entry_proxy, dbus_interface="org.freedesktop.Problems2.Entry")
-
-    def __getattribute__(self, name):
-        try:
-            return object.__getattribute__(self, name)
-        except AttributeError as ex:
-            entry = object.__getattribute__(self, "_entry")
-            return entry.get_dbus_method(name)
-
-    def getproperty(self, name):
-        properties = object.__getattribute__(self, "_properties")
-        return properties.Get("org.freedesktop.Problems2.Entry", name)
-
-
 def test_problem_entry_properties(tf):
     print("TEST ELEMENTARY ENTRY PROPERTIES")
 
@@ -675,7 +720,7 @@ def test_problem_entry_properties(tf):
         ("Server", { "URL" : "http://case.org"}),
         ]
 
-    for i in range(0, len(e) - 1):
+    for i in range(0, len(exp) - 1):
         assert_equals(exp[i][0], reports[i][0], "invalid reported_to label")
         assert_equals(exp[i][1], reports[i][1], "invalid reported_to value")
 
@@ -772,13 +817,17 @@ def test_save_elements(tf):
         except OSError:
             pass
 
-    resp = p2e.SaveElements({"/tmp/shadow" : "blah", "../../../../tmp/passwd" : "bar"}, 0x0)
+    expect_dbus_error("org.freedesktop.DBus.Error.AccessDenied: Not allowed problem element name",
+            p2e.SaveElements, {"/tmp/shadow" : "blah"}, 0x0)
 
     try:
         os.unlink("/tmp/shadow")
         error("accepted an absolute path")
     except OSError:
         pass
+
+    expect_dbus_error("org.freedesktop.DBus.Error.AccessDenied: Not allowed problem element name",
+            p2e.SaveElements, {"../../../../tmp/passwd" : "bar"}, 0x0)
 
     try:
         os.unlink("/tmp/passwd")
@@ -878,10 +927,10 @@ def test_new_problem_elements_count_limit(tf):
     for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
         too_many_elements[str(i)] = str(i)
 
-    retval, pp = expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements",
+    status, pp = expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements",
                     tf.p2.NewProblem, too_many_elements)
 
-    if not assert_false(retval, "NewProblem returns an error for too many elements"):
+    if not assert_true(status, "NewProblem returns an error for too many elements"):
         try:
             tf.p2.DeleteProblems([pp])
         except dbus.exceptions.DBusException as ex:
@@ -964,7 +1013,7 @@ def test_new_problem_data_size_limit(tf):
                        "executable"  : "/usr/bin/foo",
                        "type"        : "abrt-problems2-sanity"}
 
-        expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too big data",
+        expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Problem data is too big",
                               tf.p2.NewProblem, description)
 
 
@@ -1005,47 +1054,50 @@ if __name__ == "__main__":
     #logging.getLogger().setLevel(logging.DEBUG)
 
     non_root_uid = int(sys.argv[1])
-    tf = TestFrame(non_root_uid)
+    test_frame = TestFrame(non_root_uid)
 
-    test_fake_binary_type(tf)
-    test_not_allowed_elements(tf)
+    test_fake_binary_type(test_frame)
+    test_not_allowed_elements(test_frame)
 
-    tf.crash_signal_occurrences = []
-    tf.p2.connect_to_signal("Crash", tf.handle_crash)
+    test_frame.crash_signal_occurrences = []
+    test_frame.p2.connect_to_signal("Crash", test_frame.handle_crash)
 
-    test_real_problem(tf)
-    tf.wait_for_signals(["Crash"])
+    test_new_problem_sanitized_uid(test_frame)
+    test_new_problem_sanitized_elements(test_frame)
 
-    tf.private_problem_id = create_problem(tf.root_p2)
+    test_real_problem(test_frame)
+    test_frame.wait_for_signals(["Crash"])
 
-    test_get_problems(tf)
-    test_get_problem_data(tf)
-    test_delete_problems(tf)
-    test_get_session(tf)
+    test_frame.private_problem_id = create_problem(test_frame.root_p2)
 
-    test_authrorize(tf)
+    test_get_problems(test_frame)
+    test_get_problem_data(test_frame)
+    test_delete_problems(test_frame)
+    test_get_session(test_frame)
 
-    test_get_private_problem(tf)
+    test_authrorize(test_frame)
 
-    test_close(tf)
+    test_get_private_problem(test_frame)
 
-    test_private_problem_not_accessible(tf)
-    test_problem_entry_properties(tf)
-    test_read_elements(tf)
-    test_save_elements(tf)
-    test_delete_elements(tf)
+    test_close(test_frame)
 
-    test_open_too_many_sessions(tf)
-    test_foreign_session(tf)
+    test_private_problem_not_accessible(test_frame)
+    test_problem_entry_properties(test_frame)
+    test_read_elements(test_frame)
+    test_save_elements(test_frame)
+    test_delete_elements(test_frame)
 
-    test_new_problem_elements_count_limit(tf)
-    test_save_elements_count_limit(tf)
+    test_open_too_many_sessions(test_frame)
+    test_foreign_session(test_frame)
 
-    test_new_problem_data_size_limit(tf)
-    test_save_elements_data_size_limit(tf)
+    test_new_problem_elements_count_limit(test_frame)
+    test_save_elements_count_limit(test_frame)
 
-    tf.p2_session.Close()
+    test_new_problem_data_size_limit(test_frame)
+    test_save_elements_data_size_limit(test_frame)
 
-    root_session_proxy = tf.root_bus.get_object(BUS_NAME, tf.root_p2.GetSession())
-    root_session = dbus.Interface(root_session_proxy, dbus_interface='org.freedesktop.Problems2.Session')
-    root_session.Close()
+    test_frame.p2_session.Close()
+
+    rsp = test_frame.root_bus.get_object(BUS_NAME, test_frame.root_p2.GetSession())
+    rs = dbus.Interface(rsp, dbus_interface='org.freedesktop.Problems2.Session')
+    rs.Close()
