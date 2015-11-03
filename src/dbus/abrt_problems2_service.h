@@ -70,6 +70,8 @@ unsigned abrt_problems2_service_elements_limit(uid_t uid);
 
 off_t abrt_problems2_service_dd_size_limit(uid_t uid);
 
+int abrt_problems2_service_allowed_new_problem(uid_t uid);
+
 /*
  * Utilities
  */

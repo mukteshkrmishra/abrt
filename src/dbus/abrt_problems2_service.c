@@ -41,6 +41,8 @@ PolkitAuthority *abrt_problems2_polkit_authority(void)
 struct p2_user_info
 {
     unsigned sessions;
+    unsigned new_problems;
+    time_t new_problem_last;
 };
 
 void p2_user_info_free(struct p2_user_info *info)
@@ -625,4 +627,53 @@ unsigned abrt_problems2_service_elements_limit(uid_t uid)
 off_t abrt_problems2_service_dd_size_limit(uid_t uid)
 {
     return uid == 0 ? 0 : 2L*1024L*1024L*1024L;
+}
+
+/* TODO: return -E2BIG when user owns too many problem directories */
+int abrt_problems2_service_allowed_new_problem(uid_t uid)
+{
+    if (uid == 0)
+        return 1;
+
+    time_t current = time(NULL);
+    if (current == (time_t)-1)
+    {
+        perror_msg("time");
+        return -1;
+    }
+
+    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+                                            (gconstpointer)(gint64)uid);
+    if (user == NULL)
+    {
+        error_msg("User does not have Session: uid=%lu", (long unsigned)uid);
+        return -1;
+    }
+
+    if (current < user->new_problem_last)
+    {
+        error_msg("The last problem was created in future: uid=%lu", (long unsigned)uid);
+        return -1;
+    }
+
+    /* Allows 10 new problems to be created in a batch but then allow only 1 new
+     * problem per 16s.
+     */
+    const long unsigned off = current - user->new_problem_last;
+    /* off / 16; */
+    const long unsigned incr = (off >> 4);
+
+    /* Avoid overflow. Beware of adding operation inside the condition! */
+    if (   incr > 10
+        || (user->new_problems += incr) > 10)
+        user->new_problems = 10;
+
+    log_debug("NewProblem limit: last %lu, current %lu, increment %lu, remaining %u",
+            (long unsigned)user->new_problem_last, (long unsigned)current, incr, user->new_problems);
+
+    if (user->new_problems == 0)
+        return 0;
+
+    user->new_problem_last = current;
+    return user->new_problems--;
 }

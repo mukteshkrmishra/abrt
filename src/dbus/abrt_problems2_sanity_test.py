@@ -648,7 +648,7 @@ def test_close(tf):
         error("still authorized")
 
 
-def create_problem(p2):
+def create_problem(p2, wait=True):
     randomstring = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(16))
     description = {"analyzer"    : "problems2testsuite_analyzer",
                    "type"        : "problems2testsuite_type",
@@ -659,7 +659,9 @@ def create_problem(p2):
                    "executable"  : "/usr/bin/foo",}
 
     p2p = p2.NewProblem(description)
-    time.sleep(1)
+
+    if wait:
+        time.sleep(1)
 
     return p2p
 
@@ -1042,6 +1044,30 @@ def test_save_elements_data_size_limit(tf):
         assert_equals(smaller_ed[key], data[key], "SaveElements: dump directory does not grow")
 
 
+def test_new_problem_time_limit(tf):
+    print("TEST NEW PROBLEMS COUNT PER PERIOD OF TIME LIMIT")
+
+    problems = list()
+    def bunch_of_new_problems(upper_limit):
+        for i in range(0, upper_limit):
+            problem_path = create_problem(tf.p2, wait=False)
+            problems.append(problem_path)
+
+    expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too many problems have been recently created",
+           bunch_of_new_problems, 11)
+
+    tf.p2.DeleteProblems(problems)
+    problems = list()
+
+    time.sleep(16)
+
+    expect_dbus_error("org.freedesktop.DBus.Error.LimitsExceeded: Too many problems have been recently created",
+           bunch_of_new_problems, 3)
+
+    assert_true(len(problems) >= 1, "The limit has been restored")
+    tf.p2.DeleteProblems(problems)
+
+
 if __name__ == "__main__":
     if os.getuid() != 0:
         print("Run this test under root!")
@@ -1095,6 +1121,11 @@ if __name__ == "__main__":
 
     test_new_problem_data_size_limit(test_frame)
     test_save_elements_data_size_limit(test_frame)
+
+    test_new_problem_time_limit(test_frame)
+
+    # Don't test it until the limit can be configured
+    # test_problems_count_limit(test_frame)
 
     test_frame.p2_session.Close()
 

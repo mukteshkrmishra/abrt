@@ -174,6 +174,26 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("NewProblem", method_name) == 0)
     {
+        int r = abrt_problems2_service_allowed_new_problem(caller_uid);
+        if (r == 0)
+        {
+            g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                    "Too many problems have been recently created");
+            return;
+        }
+        if (r == -E2BIG)
+        {
+            g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                    "No more problems can be created");
+            return;
+        }
+        if (r < 0)
+        {
+            g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Failed to check NewProblem limits");
+            return;
+        }
+
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
