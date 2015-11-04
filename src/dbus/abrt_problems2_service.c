@@ -25,27 +25,29 @@
 #include "abrt_problems2_session_node.h"
 #include "abrt_problems2_entry_node.h"
 
-static GMainLoop *g_loop;
 static GDBusProxy *g_proxy_dbus;
-static int g_timeout_value = 10;
-static int g_users_clients_limit = 5;
 static GHashTable *g_connected_users;
 struct abrt_problems2_object *g_problems2_object;
 static PolkitAuthority *g_polkit_authority;
 
-PolkitAuthority *abrt_problems2_polkit_authority(void)
-{
-    return g_polkit_authority;
-}
-
-struct p2_user_info
+/*
+ * User details
+ */
+struct user_info
 {
     unsigned sessions;
+    long unsigned problems;
     unsigned new_problems;
     time_t new_problem_last;
 };
 
-void p2_user_info_free(struct p2_user_info *info)
+static struct user_info *user_info_new(void)
+{
+    struct user_info *user = xzalloc(sizeof(*user));
+    return user;
+}
+
+static void user_info_free(struct user_info *info)
 {
     if (info == NULL)
         return;
@@ -55,29 +57,39 @@ void p2_user_info_free(struct p2_user_info *info)
     free(info);
 }
 
-struct abrt_problems2_object_type
+/*
+ * DBus object type
+ */
+struct problems2_object_type
 {
     GDBusNodeInfo *node;
     GDBusInterfaceInfo *iface;
     GDBusInterfaceVTable *vtable;
     GHashTable *objects;
-} g_problems2_type, g_problems2_session_type, g_problems2_entry_type;
+};
 
-static void abrt_problems2_object_type_init(struct abrt_problems2_object_type *type,
+
+static int problems2_object_type_init(struct problems2_object_type *type,
         const char *xml_node,
         GDBusInterfaceVTable *vtable)
 {
-    GError *error = NULL;
-    type->node = g_dbus_node_info_new_for_xml(xml_node, &error);
-    if (error != NULL)
-        error_msg_and_die("Could not parse interface: %s", error->message);
+    GError *local_error = NULL;
+    type->node = g_dbus_node_info_new_for_xml(xml_node, &local_error);
+    if (local_error != NULL)
+    {
+        log_info("Failed to parse XML interface file: %s", local_error->message);
+        g_error_free(local_error);
+        return -1;
+    }
 
     type->iface = type->node->interfaces[0];
     type->vtable = vtable;
     type->objects = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, NULL);
+
+    return 0;
 }
 
-static void abrt_problems2_object_type_destroy(struct abrt_problems2_object_type *type)
+static void problems2_object_type_destroy(struct problems2_object_type *type)
 {
     g_hash_table_destroy(type->objects);
     type->objects = (void *)0xDEADBEEF;
@@ -86,13 +98,16 @@ static void abrt_problems2_object_type_destroy(struct abrt_problems2_object_type
     type->node = (void *)0xDEADBEEF;
 }
 
+/*
+ * DBus object
+ */
 struct abrt_problems2_object
 {
     char *path;
     guint regid;
     void *node;
     void (*destructor)(struct abrt_problems2_object *);
-    struct abrt_problems2_object_type *type;
+    struct problems2_object_type *type;
 };
 
 void abrt_problems2_object_free(struct abrt_problems2_object *obj)
@@ -128,8 +143,29 @@ void abrt_problems2_object_destroy(struct abrt_problems2_object *object,
     g_dbus_connection_unregister_object(connection, object->regid);
 }
 
+void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
+        const char *member,
+        GVariant *parameters,
+        GDBusConnection *connection)
+{
+    GDBusMessage *message = g_dbus_message_new_signal(object->path, object->type->iface->name, member);
+    g_dbus_message_set_sender(message, ABRT_P2_BUS);
+    g_dbus_message_set_body(message, parameters);
+
+    log_debug("Emitting signal '%s'", member);
+
+    GError *error = NULL;
+    g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
+    g_object_unref(message);
+    if (error != NULL)
+    {
+        error_msg("Failed to emit signal '%s': %s", member, error->message);
+        g_free(error);
+    }
+}
+
 static int register_object(GDBusConnection *connection,
-        struct abrt_problems2_object_type *type,
+        struct problems2_object_type *type,
         char *path,
         void *node,
         void (*destructor)(struct abrt_problems2_object *),
@@ -176,33 +212,41 @@ static int register_object(GDBusConnection *connection,
     return 0;
 }
 
-void session_object_destructor(struct abrt_problems2_object *obj)
+/*
+ * /org/freedesktop/Problems2/Session/XYZ
+ */
+static struct problems2_object_type g_problems2_session_type;
+
+static void session_object_destructor(struct abrt_problems2_object *obj)
 {
     struct p2s_node *session = (struct p2s_node *)obj->node;
 
     uid_t uid = abrt_problems2_session_uid(session);
-    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+    struct user_info *user = g_hash_table_lookup(g_connected_users,
                                             (gconstpointer)(gint64)uid);
 
-    user->sessions -= 1;
     if (user->sessions == 0)
-        g_hash_table_remove(g_connected_users, (gconstpointer)(gint64)uid);
+    {
+        error_msg("BUG: destructing session object for user who does not have session opened");
+        abort();
+    }
 
+    user->sessions -= 1;
     abrt_problems2_session_node_free(session);
 }
 
-static struct abrt_problems2_object *register_session_object(GDBusConnection *connection,
+static struct abrt_problems2_object *session_object_register(GDBusConnection *connection,
         char *path,
         const char *caller,
         uid_t caller_uid,
         GError **error)
 {
-    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+    struct user_info *user = g_hash_table_lookup(g_connected_users,
                                         (gconstpointer)(gint64)caller_uid);
 
-    if (user != NULL && user->sessions >= g_users_clients_limit)
+    if (user != NULL && user->sessions >= abrt_problems2_service_user_clients_limit(caller_uid))
     {
-        log_warning("User %lu reached the limit of opened sessions (%d)", (long unsigned)caller_uid, g_users_clients_limit);
+        log_warning("User %lu reached the limit of opened sessions (%d)", (long unsigned)caller_uid, abrt_problems2_service_user_clients_limit(caller_uid));
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                     "Too many sessions opened");
         free(path);
@@ -229,7 +273,7 @@ static struct abrt_problems2_object *register_session_object(GDBusConnection *co
 
     if (user == NULL)
     {
-        user = xzalloc(sizeof(*user));
+        user = user_info_new();
         g_hash_table_insert(g_connected_users, (gpointer)(gint64)caller_uid, user);
     }
 
@@ -238,7 +282,7 @@ static struct abrt_problems2_object *register_session_object(GDBusConnection *co
     return obj;
 }
 
-static char *abrt_problems2_caller_to_session_path(const char *caller)
+static char *caller_to_session_path(const char *caller)
 {
     char hash_str[SHA1_RESULT_LEN*2 + 1];
     str_to_sha1str(hash_str, caller);
@@ -250,13 +294,13 @@ static struct abrt_problems2_object *get_session_for_caller(GDBusConnection *con
         uid_t caller_uid,
         GError **error)
 {
-    char *session_path = abrt_problems2_caller_to_session_path(caller);
+    char *session_path = caller_to_session_path(caller);
 
     struct abrt_problems2_object *obj = g_hash_table_lookup(g_problems2_session_type.objects, session_path);
     if (obj == NULL)
     {
         log_debug("Caller does not have Session: %s", caller);
-        return register_session_object(connection, session_path, caller, caller_uid, error);
+        return session_object_register(connection, session_path, caller, caller_uid, error);
     }
 
     free(session_path);
@@ -281,6 +325,14 @@ const char *abrt_problems2_service_session_path(GDBusConnection *connection,
 
     struct abrt_problems2_object *obj = get_session_for_caller(connection, caller, caller_uid, error);
     return obj == NULL ? NULL : obj->path;
+}
+
+/*
+ * Utility functions
+ */
+PolkitAuthority *abrt_problems2_polkit_authority(void)
+{
+    return g_polkit_authority;
 }
 
 uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection,
@@ -338,7 +390,12 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
     return caller_uid;
 }
 
-void entry_object_destructor(struct abrt_problems2_object *obj)
+/*
+ * /org/freedesktop/Problems2/Entry/XYZ
+ */
+static struct problems2_object_type g_problems2_entry_type;
+
+static void entry_object_destructor(struct abrt_problems2_object *obj)
 {
     struct p2e_node *entry = (struct p2e_node *)obj->node;
 
@@ -364,28 +421,28 @@ static const char *register_dump_dir_entry_node(GDBusConnection *connection, con
     if (r != 0)
         return NULL;
 
-    return path;
-}
+    struct dump_dir *dd = dd_opendir(dd_dirname, DD_OPEN_FD_ONLY);
+    uid_t owner = dd_get_owner(dd);
+    dd_close(dd);
 
-void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
-        const char *member,
-        GVariant *parameters,
-        GDBusConnection *connection)
-{
-    GDBusMessage *message = g_dbus_message_new_signal(object->path, object->type->iface->name, member);
-    g_dbus_message_set_sender(message, ABRT_P2_BUS);
-    g_dbus_message_set_body(message, parameters);
+    struct user_info *user = g_hash_table_lookup(g_connected_users,
+                                        (gconstpointer)(gint64)owner);
 
-    log_debug("Emitting signal '%s'", member);
-
-    GError *error = NULL;
-    g_dbus_connection_send_message(connection, message, G_DBUS_SEND_MESSAGE_FLAGS_NONE, NULL, &error);
-    g_object_unref(message);
-    if (error != NULL)
+    if (user == NULL)
     {
-        error_msg("Failed to emit signal '%s': %s", member, error->message);
-        g_free(error);
+        user = user_info_new();
+        g_hash_table_insert(g_connected_users, (gpointer)(gint64)owner, user);
     }
+
+    if (user->problems == ULONG_MAX)
+    {
+        /* Give up, we cannot recover from this. */
+        error_msg_and_die("Too many problems owned by a single user: uid=%lu", (long unsigned)owner);
+    }
+
+    user->problems++;
+
+    return path;
 }
 
 struct save_problem_args
@@ -489,6 +546,11 @@ GList *abrt_problems2_service_get_problems_nodes(uid_t uid)
     return paths;
 }
 
+/*
+ * Service functions + /org/freedesktop/Problems2
+ */
+static struct problems2_object_type g_problems2_type;
+
 static int bridge_register_dump_dir_entry_node(struct dump_dir *dd, void *connection)
 {
     /* Ignore return value */
@@ -496,9 +558,7 @@ static int bridge_register_dump_dir_entry_node(struct dump_dir *dd, void *connec
     return 0;
 }
 
-static void on_bus_acquired(GDBusConnection *connection,
-                            const gchar     *name,
-                            gpointer         user_data)
+void abrt_problems2_service_register_objects(GDBusConnection *connection)
 {
     const int r = register_object(connection,
                                   &g_problems2_type,
@@ -511,112 +571,77 @@ static void on_bus_acquired(GDBusConnection *connection,
         for_each_problem_in_dir(g_settings_dump_location, (uid_t)-1, bridge_register_dump_dir_entry_node, connection);
 }
 
-static void on_name_acquired(GDBusConnection *connection,
-                             const gchar     *name,
-                             gpointer         user_data)
+int abrt_problems2_service_init(void)
 {
-    log_debug("Acquired the name '%s' on the system bus", name);
-}
-
-static void on_name_lost(GDBusConnection *connection,
-                         const gchar     *name,
-                         gpointer         user_data)
-{
-    log_warning(_("The name '%s' has been lost, please check if other "
-              "service owning the name is not running.\n"), name);
-    exit(1);
-}
-
-void quit_loop(int signo)
-{
-    g_main_loop_quit(g_loop);
-}
-
-int main(int argc, char *argv[])
-{
-    /* I18n */
-    setlocale(LC_ALL, "");
-#if ENABLE_NLS
-    bindtextdomain(PACKAGE, LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-    guint owner_id;
-
-    glib_init();
-    abrt_init(argv);
-    load_abrt_conf();
-
-    const char *program_usage_string = _(
-        "& [options]"
-    );
-    enum {
-        OPT_v = 1 << 0,
-        OPT_t = 1 << 1,
-    };
-    /* Keep enum above and order of options below in sync! */
-    struct options program_options[] = {
-        OPT__VERBOSE(&g_verbose),
-        OPT_INTEGER('t', NULL, &g_timeout_value, _("Exit after NUM seconds of inactivity")),
-        OPT_END()
-    };
-    /*unsigned opts =*/ parse_opts(argc, argv, program_options, program_usage_string);
-
-    export_abrt_envvars(0);
-
-    msg_prefix = "abrt-problems2"; /* for log(), error_msg() and such */
-
-    if (getuid() != 0)
-        error_msg_and_die(_("This program must be run as root."));
-
-
-    abrt_problems2_object_type_init(&g_problems2_type,
+    int r = 0;
+    r = problems2_object_type_init(&g_problems2_type,
             g_org_freedesktop_Problems2_xml, abrt_problems2_node_vtable());
+    if (r != 0)
+    {
+        log_notice("Failed to initialize org.freedesktop.Problems2 type");
+        goto error_return;
+    }
 
-    abrt_problems2_object_type_init(&g_problems2_session_type,
+    r = problems2_object_type_init(&g_problems2_session_type,
             g_org_freedesktop_Problems2_Session_xml, abrt_problems2_session_node_vtable());
 
-    abrt_problems2_object_type_init(&g_problems2_entry_type,
+    if (r != 0)
+    {
+        log_notice("Failed to initialize org.freedesktop.Problems2.Session type");
+        goto error_return;
+    }
+
+    r = problems2_object_type_init(&g_problems2_entry_type,
             g_org_freedesktop_Problems2_Entry_xml, abrt_problems2_entry_node_vtable());
+    if (r != 0)
+    {
+        log_notice("Failed to initialize org.freedesktop.Problems2.Entry type");
+        goto error_return;
+    }
 
-    g_connected_users = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)p2_user_info_free);
+    g_connected_users = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL, (GDestroyNotify)user_info_free);
 
-    owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
-                              ABRT_P2_BUS,
-                              G_BUS_NAME_OWNER_FLAGS_NONE,
-                              on_bus_acquired,
-                              on_name_acquired,
-                              on_name_lost,
-                              NULL,
-                              (GDestroyNotify)NULL);
-
-    GError *error = NULL;
-    g_polkit_authority = polkit_authority_get_sync(NULL, &error);
+    GError *local_error = NULL;
+    g_polkit_authority = polkit_authority_get_sync(NULL, &local_error);
     if (g_polkit_authority == NULL)
-        error_msg_and_die(_("Failed to get PolkitAuthority: %s"), error->message);
+    {
+        r = -1;
+        log_notice("Failed to get PolkitAuthority: %s", local_error->message);
+        g_error_free(local_error);
+        goto error_return;
+    }
 
-    g_loop = g_main_loop_new(NULL, FALSE);
+    return 0;
 
-    signal(SIGABRT, quit_loop);
+error_return:
+    abrt_problems2_service_uninit();
+    return r;
+}
 
-    g_main_loop_run(g_loop);
-    g_main_loop_unref(g_loop);
+void abrt_problems2_service_uninit(void)
+{
+    if (g_connected_users != NULL)
+        g_hash_table_destroy(g_connected_users);
 
-    log_notice("Cleaning up");
+    if (g_problems2_entry_type.node != NULL)
+        problems2_object_type_destroy(&g_problems2_entry_type);
 
-    g_bus_unown_name(owner_id);
+    if (g_problems2_session_type.node != NULL)
+        problems2_object_type_destroy(&g_problems2_session_type);
 
-    g_hash_table_destroy(g_connected_users);
-
-    abrt_problems2_object_type_destroy(&g_problems2_entry_type);
-    abrt_problems2_object_type_destroy(&g_problems2_session_type);
-    abrt_problems2_object_type_destroy(&g_problems2_type);
+    if (g_problems2_type.node != NULL)
+        problems2_object_type_destroy(&g_problems2_type);
 
     if (g_proxy_dbus != NULL)
         g_object_unref(g_proxy_dbus);
+}
 
-    free_abrt_conf_data();
-
-    return 0;
+/*
+ * Service configuration
+ */
+unsigned abrt_problems2_service_user_clients_limit(uid_t uid)
+{
+    return 5;
 }
 
 unsigned abrt_problems2_service_elements_limit(uid_t uid)
@@ -629,7 +654,6 @@ off_t abrt_problems2_service_dd_size_limit(uid_t uid)
     return uid == 0 ? 0 : 2L*1024L*1024L*1024L;
 }
 
-/* TODO: return -E2BIG when user owns too many problem directories */
 int abrt_problems2_service_allowed_new_problem(uid_t uid)
 {
     if (uid == 0)
@@ -642,13 +666,16 @@ int abrt_problems2_service_allowed_new_problem(uid_t uid)
         return -1;
     }
 
-    struct p2_user_info *user = g_hash_table_lookup(g_connected_users,
+    struct user_info *user = g_hash_table_lookup(g_connected_users,
                                             (gconstpointer)(gint64)uid);
     if (user == NULL)
     {
         error_msg("User does not have Session: uid=%lu", (long unsigned)uid);
         return -1;
     }
+
+    if (user->problems >= 1000)
+        return -E2BIG;
 
     if (current < user->new_problem_last)
     {

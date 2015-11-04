@@ -1,7 +1,12 @@
 sbin_PROGRAMS = \
     abrt-dbus \
-    abrt-configuration \
+    abrt-configuration
+
+noinst_PROGRAMS = \
     abrt-problems2
+
+noinst_LIBRARIES = \
+    libabrt-problems2-service.a
 
 abrt_dbus_SOURCES = \
     abrt-dbus.c \
@@ -23,8 +28,7 @@ abrt_dbus_LDADD = \
     $(POLKIT_LIBS) \
     -labrt_dbus
 
-# TODO abrt-polkit to noninst library
-abrt_problems2_SOURCES = \
+libabrt_problems2_service_a_SOURCES = \
     abrt_problems2_service.c \
     abrt_problems2_service.h \
     abrt_problems2_node.c \
@@ -33,13 +37,24 @@ abrt_problems2_SOURCES = \
     abrt_problems2_session_node.h \
     abrt_problems2_entry_node.c \
     abrt_problems2_entry_node.h
+# Manual dependency
+libabrt_problems2_service_a-abrt_problems2_service.$(OBJEXT): \
+    abrt_problems2_generated_interfaces.h
+libabrt_problems2_service_a_CPPFLAGS = \
+    -I$(srcdir)/../include \
+    -I$(srcdir)/../lib \
+    $(GIO_CFLAGS) \
+    $(GIO_UNIX_CFLAGS) \
+    $(DBUS_CFLAGS) \
+    $(LIBREPORT_CFLAGS) \
+    $(POLKIT_CFLAGS) \
+    -D_GNU_SOURCE
 
-abrt_problems2-abrt_problems2_service.$(OBJEXT):  abrt_problems2_generated_interfaces.h
+abrt_problems2_SOURCES = \
+    abrt_problems2.c
 
 abrt_problems2_CPPFLAGS = \
     -I$(srcdir)/../include \
-    -I$(srcdir)/../lib \
-    -DVAR_RUN=\"$(VAR_RUN)\" \
     $(GIO_CFLAGS) \
     $(GIO_UNIX_CFLAGS) \
     $(DBUS_CFLAGS) \
@@ -47,6 +62,7 @@ abrt_problems2_CPPFLAGS = \
     $(POLKIT_CFLAGS) \
     -D_GNU_SOURCE
 abrt_problems2_LDADD = \
+    libabrt-problems2-service.a \
     $(GIO_LIBS) \
     $(GIO_UNIX_LIBS) \
     ../lib/libabrt.la \
@@ -86,22 +102,27 @@ orgfreedesktopproblemsservicedir = ${datadir}/dbus-1/system-services
 dist_orgfreedesktopproblemsservice_DATA = org.freedesktop.problems.service \
     com.redhat.problems.configuration.service
 
-iface_def_dir=$(abs_top_srcdir)/doc/problems-service/
+IFACE_DEF_DIR=$(abs_top_srcdir)/doc/problems-service/
 
-.PHONY: $(iface_def_dir)/org.freedesktop.Problems2.xml
-$(iface_def_dir)/org.freedesktop.Problems2.xml:
-	$(MAKE) -C $(iface_def_dir) $$(basename $@)
+PROBLEMS2_XML_FILES=\
+    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml \
+    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Entry.xml \
+    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml
 
-.PHONY: $(iface_def_dir)/org.freedesktop.Problems2.Entry.xml
-$(iface_def_dir)/org.freedesktop.Problems2.Entry.xml:
-	$(MAKE) -C $(iface_def_dir) $$(basename $@)
+.PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml
+$(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml:
+	$(MAKE) -C $(IFACE_DEF_DIR) $$(basename $@)
 
-.PHONY: $(iface_def_dir)/org.freedesktop.Problems2.Session.xml
-$(iface_def_dir)/org.freedesktop.Problems2.Session.xml:
-	$(MAKE) -C $(iface_def_dir) $$(basename $@)
+.PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Entry.xml
+$(IFACE_DEF_DIR)/org.freedesktop.Problems2.Entry.xml:
+	$(MAKE) -C $(IFACE_DEF_DIR) $$(basename $@)
+
+.PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml
+$(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml:
+	$(MAKE) -C $(IFACE_DEF_DIR) $$(basename $@)
 
 .PHONY: abrt_problems2_generated_interfaces.h
-abrt_problems2_generated_interfaces.h: $(iface_def_dir)/org.freedesktop.Problems2.xml $(iface_def_dir)/org.freedesktop.Problems2.Entry.xml $(iface_def_dir)/org.freedesktop.Problems2.Session.xml
+abrt_problems2_generated_interfaces.h: $(PROBLEMS2_XML_FILES)
 	echo "/* This file has been generated. Do not write any code here. */" > $@
 	for f in $^; do echo "const char *g_$$(basename $$f .xml | tr . _)_xml =" >> $@; sed -e 's/"/\\"/g' -e 's/^\(.*\)$$/"\1"/' $$f >> $@; echo ";" >> $@; done
 

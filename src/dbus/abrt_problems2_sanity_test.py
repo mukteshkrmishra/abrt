@@ -1099,6 +1099,10 @@ if __name__ == "__main__":
     test_get_problems(test_frame)
     test_get_problem_data(test_frame)
     test_delete_problems(test_frame)
+
+    # Would be better to restart the service!
+    time.sleep(16)
+
     test_get_session(test_frame)
 
     test_authrorize(test_frame)

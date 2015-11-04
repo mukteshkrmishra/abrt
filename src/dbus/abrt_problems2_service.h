@@ -40,6 +40,14 @@ void abrt_problems2_object_emit_signal(struct abrt_problems2_object *object,
             const char *member, GVariant *parameters,
             GDBusConnection *connection);
 
+/*
+ * Service administration
+ */
+int abrt_problems2_service_init(void);
+
+void abrt_problems2_service_uninit(void);
+
+void abrt_problems2_service_register_objects(GDBusConnection *connection);
 
 /*
  * Shared functionality
@@ -65,6 +73,7 @@ problem_data_t *abrt_problems2_service_entry_problem_data(const char *entry_path
 
 GList *abrt_problems2_service_get_problems_nodes(uid_t uid);
 
+unsigned abrt_problems2_service_user_clients_limit(uid_t uid);
 
 unsigned abrt_problems2_service_elements_limit(uid_t uid);
 
