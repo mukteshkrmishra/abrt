@@ -8,6 +8,7 @@
 #include "abrt_glib.h"
 #include <libreport/dump_dir.h>
 #include "problem_api.h"
+#include "abrt_problems2_service.h"
 
 static GMainLoop *loop;
 static guint g_timeout_source;
@@ -90,55 +91,6 @@ static void reset_timeout(void)
     }
     log_info("Setting a new timeout");
     g_timeout_source = g_timeout_add_seconds(g_timeout_value, on_timeout_cb, NULL);
-}
-
-static uid_t get_caller_uid(GDBusConnection *connection, GDBusMethodInvocation *invocation, const char *caller)
-{
-    GError *error = NULL;
-    guint caller_uid;
-
-    GDBusProxy * proxy = g_dbus_proxy_new_sync(connection,
-                                     G_DBUS_PROXY_FLAGS_NONE,
-                                     NULL,
-                                     "org.freedesktop.DBus",
-                                     "/org/freedesktop/DBus",
-                                     "org.freedesktop.DBus",
-                                     NULL,
-                                     &error);
-
-    GVariant *result = g_dbus_proxy_call_sync(proxy,
-                                     "GetConnectionUnixUser",
-                                     g_variant_new ("(s)", caller),
-                                     G_DBUS_CALL_FLAGS_NONE,
-                                     -1,
-                                     NULL,
-                                     &error);
-
-    if (result == NULL)
-    {
-        /* we failed to get the uid, so return (uid_t) -1 to indicate the error
-         */
-        if (error)
-        {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                      "org.freedesktop.problems.InvalidUser",
-                                      error->message);
-            g_error_free(error);
-        }
-        else
-        {
-            g_dbus_method_invocation_return_dbus_error(invocation,
-                                      "org.freedesktop.problems.InvalidUser",
-                                      _("Unknown error"));
-        }
-        return (uid_t) -1;
-    }
-
-    g_variant_get(result, "(u)", &caller_uid);
-    g_variant_unref(result);
-
-    log_info("Caller uid: %i", caller_uid);
-    return caller_uid;
 }
 
 bool allowed_problem_dir(const char *dir_name)
@@ -397,12 +349,16 @@ static void handle_method_call(GDBusConnection *connection,
     uid_t caller_uid;
     GVariant *response;
 
-    caller_uid = get_caller_uid(connection, invocation, caller);
+    GError *error = NULL;
+    caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    if (caller_uid == (uid_t) -1)
+    {
+        g_dbus_method_invocation_return_gerror(invocation, error);
+        g_error_free(error);
+        return;
+    }
 
     log_notice("caller_uid:%ld method:'%s'", (long)caller_uid, method_name);
-
-    if (caller_uid == (uid_t) -1)
-        return;
 
     if (g_strcmp0(method_name, "NewProblem") == 0)
     {
@@ -858,6 +814,8 @@ static void on_bus_acquired(GDBusConnection *connection,
                                                        NULL); /* GError** */
     g_assert(registration_id > 0);
 
+    abrt_problems2_service_register_objects(connection);
+
     reset_timeout();
 }
 
@@ -931,6 +889,10 @@ int main(int argc, char *argv[])
     if (err != NULL)
         error_msg_and_die("Invalid D-Bus interface: %s", err->message);
 
+    int r = abrt_problems2_service_init();
+    if (r != 0)
+        error_msg_and_die("Failed to initialize Problems2 service: %s", err->message);
+
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
                              ABRT_DBUS_NAME,
                              G_BUS_NAME_OWNER_FLAGS_NONE,
@@ -950,6 +912,7 @@ int main(int argc, char *argv[])
 
     g_bus_unown_name(owner_id);
 
+    abrt_problems2_service_uninit();
     g_dbus_node_info_unref(introspection_data);
 
     free_abrt_conf_data();

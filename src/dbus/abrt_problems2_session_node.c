@@ -173,6 +173,7 @@ static void dbus_method_call(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
+        g_error_free(error);
         return;
     }
 
@@ -180,6 +181,7 @@ static void dbus_method_call(GDBusConnection *connection,
     if (abrt_problems2_session_check_sanity(node, caller, caller_uid, &error) != 0)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
+        g_error_free(error);
         return;
     }
 

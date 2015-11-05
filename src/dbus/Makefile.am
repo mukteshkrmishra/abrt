@@ -22,6 +22,7 @@ abrt_dbus_CPPFLAGS = \
     $(POLKIT_CFLAGS) \
     -D_GNU_SOURCE
 abrt_dbus_LDADD = \
+    libabrt-problems2-service.a \
     $(GIO_LIBS) \
     ../lib/libabrt.la \
     $(LIBREPORT_LIBS) \
