@@ -41,8 +41,8 @@ static void on_name_lost(GDBusConnection *connection,
                          const gchar     *name,
                          gpointer         user_data)
 {
-    log_warning(_("The name '%s' has been lost, please check if other "
-              "service owning the name is not running.\n"), name);
+    log_warning("The name '%s' has been lost, please check if other "
+              "service owning the name is not running.\n", name);
     exit(1);
 }
 
@@ -65,9 +65,8 @@ int main(int argc, char *argv[])
     abrt_init(argv);
     load_abrt_conf();
 
-    const char *program_usage_string = _(
-        "& [options]"
-    );
+    const char *program_usage_string = "& [options]";
+
     enum {
         OPT_v = 1 << 0,
         OPT_t = 1 << 1,
@@ -75,7 +74,7 @@ int main(int argc, char *argv[])
     /* Keep enum above and order of options below in sync! */
     struct options program_options[] = {
         OPT__VERBOSE(&g_verbose),
-        OPT_INTEGER('t', NULL, &g_timeout_value, _("Exit after NUM seconds of inactivity")),
+        OPT_INTEGER('t', NULL, &g_timeout_value, "Exit after NUM seconds of inactivity"),
         OPT_END()
     };
     /*unsigned opts =*/ parse_opts(argc, argv, program_options, program_usage_string);
@@ -85,12 +84,12 @@ int main(int argc, char *argv[])
     msg_prefix = "abrt-problems2"; /* for log(), error_msg() and such */
 
     if (getuid() != 0)
-        error_msg_and_die(_("This program must be run as root."));
+        error_msg_and_die("This program must be run as root.");
 
     int r = abrt_problems2_service_init();
     if (r != 0)
     {
-        error_msg_and_die(_("Failed to initialize ABRT Problems2 service"));
+        error_msg_and_die("Failed to initialize ABRT Problems2 service");
     }
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
