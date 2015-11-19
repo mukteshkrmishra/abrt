@@ -265,7 +265,7 @@ def create_problem(test, p2, wait=True, description=None):
     if not "duphash" in description:
         description["duphash"] = randomstring
 
-    p2p = p2.NewProblem(description)
+    p2p = p2.NewProblem(description, 0)
 
     if wait:
         wait_for_hooks(test)
@@ -294,7 +294,9 @@ def create_fully_initialized_problem(test, p2, wait=True, unique=False):
                            "component"   : "abrt",
                            "reported_to" : "ABRT Server: BTHASH=0123456789ABCDEF MSG=test\nServer: URL=http://example.org\nServer: URL=http://case.org\n",
                            "hugetext"    : dbus.types.UnixFd(hugetext_file),
-                           "binary"      : dbus.types.UnixFd(bintrue_file)}
+                           "binary"      : dbus.types.UnixFd(bintrue_file),
+                           "bytes"       : dbus.types.Array(bytearray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF]), "y"),
+                          }
 
             if not unique:
                 description["uuid"] = "0123456789ABCDEF"

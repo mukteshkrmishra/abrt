@@ -2,6 +2,7 @@
 
 import os
 import dbus
+import unittest
 
 import abrt_p2_testing
 from abrt_p2_testing import (wait_for_hooks,
@@ -28,20 +29,23 @@ class TestSaveElements(abrt_p2_testing.TestCase):
         with open("/tmp/shorttext", "w") as shorttext_file:
             shorttext_file.write(shorttext)
 
+        elembytes = dbus.types.Array(bytearray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF]), "y")
         with open("/tmp/shorttext", "r") as fstab_file:
-            request = { "random" : "random text",
-                        "shorttext" : dbus.types.UnixFd(fstab_file) }
+            request = { "random"    : "random text",
+                        "shorttext" : dbus.types.UnixFd(fstab_file),
+                        "bytes"     : elembytes}
 
             dummy = p2e.SaveElements(request, 0)
 
         elements = p2e.getproperty("elements")
         self.assertIn("random", elements, "property 'elements' does not include the created elements")
         self.assertIn("shorttext", elements, "property 'elements' does not include the created elements")
+        self.assertIn("bytes", elements, "property 'elements' does not include the created elements")
 
-        resp = p2e.ReadElements(["random", "shorttext"], 0x00)
-        self.assertEqual(len(resp), 2, "not returned both requested elements")
-
-        exp = {"random" : "random text", "shorttext" : shorttext }
+        # 0x20 because binary files (bytes) are returned as in the form of
+        # File descriptor by default
+        exp = {"random" : "random text", "shorttext" : shorttext, "bytes" : elembytes}
+        resp = p2e.ReadElements(exp.keys(), 0x20)
         self.assertDictContainsSubset(exp, resp)
 
         resp = p2e.SaveElements(dict(), 0x0)

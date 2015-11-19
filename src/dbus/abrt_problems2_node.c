@@ -26,6 +26,7 @@ static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
 
 static const char *handle_NewProblem(GDBusConnection *connection,
                                      GVariant *problem_info,
+                                     gint32 flags,
                                      uid_t caller_uid,
                                      GUnixFDList *fd_list,
                                      GError **error)
@@ -199,8 +200,11 @@ static void dbus_method_call(GDBusConnection *connection,
 
         GError *error = NULL;
         GVariant *data = g_variant_get_child_value(parameters, 0);
+        gint32 flags;
+        g_variant_get_child(parameters, 1, "i", &flags);
         const char *new_path = handle_NewProblem(connection,
                                 data,
+                                flags,
                                 caller_uid,
                                 fd_list,
                                 &error);

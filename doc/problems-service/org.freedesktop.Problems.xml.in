@@ -86,9 +86,14 @@
                                 </listitem>
                             </varlistentry>
                         </variablelist>
+
+                        The value can be one of the following types: string (s), binary array (ay) or file Handle (h).
                     </tp:docstring>
                 </arg>
-                <annotation name="org.qtproject.QtDBus.QtTypeName.In0" value="QHash&lt;QString,QString&gt;"/>
+
+                <arg type='i' name='flags' direction='in'>
+                    <tp:docstring>For future needs</tp:docstring>
+                </arg>
 
                 <arg type='o' name='entry' direction='out'>
                     <tp:docstring>Object path of the new problem</tp:docstring>
@@ -109,12 +114,14 @@ proxy = bus.get_object("org.freedesktop.problems",
 
 problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
-description = {"analyzer"    : "libreport",
-               "reason"      : "Application has been killed",
-               "backtrace"   : "die()",
-               "executable"  : "/usr/bin/foo"}
+with open("/etc/services", "r") as services_file:
+    description = {"analyzer"    : "libreport",
+                   "reason"      : "Application has been killed",
+                   "backtrace"   : "die()",
+                   "executable"  : "/usr/bin/foo",
+                   "services"    : dbus.types.UnixFd(services_file)}
 
-problems.NewProblem(description)
+    problem_path = problems.NewProblem(description, 0)
 ]]>
                         </programlisting>
                     </example>
@@ -665,28 +672,32 @@ The Variable variant is definitely more convenient for users!
                     <tp:docstring>Enables selection of the allowed type and the type of return values.
                         <variablelist>
                             <varlistentry>
-                                <term>0 : NO_FLAGS</term>
+                                <term>0x0 : NO_FLAGS</term>
                                 <listitem><para>Do not check element types and return text elements as D-Bus strings, big text elements as UNIX file descriptors and binary elements as UNIX file descriptors too.</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>1 : ALL_FD</term>
+                                <term>0x1 : ALL_FD</term>
                                 <listitem><para>The returned values will be file descriptors for all element types (text, big text and binary)</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>2 : ALL_TYPES</term>
+                                <term>0x2 : ALL_TYPES</term>
                                 <listitem><para>(TODO : I am not sure what I had on mind. I will remove this term later.)</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>4 : ONLY_TEXT</term>
+                                <term>0x4 : ONLY_TEXT</term>
                                 <listitem><para>Only those elements that are of text type are read and their contents are returned as D-Bus strings by default.</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>8 : ONLY_BIG_TEXT</term>
+                                <term>0x8 : ONLY_BIG_TEXT</term>
                                 <listitem><para>Only those elements that are of binary type are read and their contents are returned as UNIX file descriptors</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>16 : ONLY_BINARY</term>
+                                <term>0x10 : ONLY_BINARY</term>
                                 <listitem><para>Only those elements that are of big text type are read and their contents are returned as UNIX file descriptors</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>0x20 : ALL_NO_FD</term>
+                                <listitem><para>Return binary data as fixed byte array</para></listitem>
                             </varlistentry>
                         </variablelist>
                     </tp:docstring>

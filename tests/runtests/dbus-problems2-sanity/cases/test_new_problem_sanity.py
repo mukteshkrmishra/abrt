@@ -38,7 +38,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "type"        : dbus.types.UnixFd(type_file)}
 
             self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: Element 'type' must be of 's' D-Bus type",
-                                  self.p2.NewProblem, description)
+                                  self.p2.NewProblem, description, 0)
 
 
     def test_not_allowed_elements(self):
@@ -50,9 +50,9 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                        "backtrace"   : "Machine Check Exception: fake" }
 
         self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: You are not allowed to create element 'type' containing 'Kerneloops'",
-                              self.p2.NewProblem, description)
+                              self.p2.NewProblem, description, 0)
 
-        self.p2_entry_root_path = self.root_p2.NewProblem(description)
+        self.p2_entry_root_path = self.root_p2.NewProblem(description, 0)
         wait_for_hooks(self)
         self.assertTrue(self.p2_entry_root_path, "root is not allowed to create type=CCpp")
 
@@ -69,7 +69,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                        "backtrace"   : "die()",
                        "executable"  : "/usr/bin/foo" }
 
-        self.p2_entry_path = self.p2.NewProblem(description)
+        self.p2_entry_path = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
         self.assertTrue(self.p2_entry_path, "Failed to create problem with uid 0")
 
@@ -79,7 +79,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
     def test_new_problem_sane_default_elements(self):
         description = {}
 
-        self.p2_entry_path = self.p2.NewProblem(description)
+        self.p2_entry_path = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
         self.assertTrue(self.p2_entry_path, "Failed to create problem without elements")
 
@@ -97,7 +97,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
             too_many_elements[str(i)] = str(i)
 
         self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements",
-                        self.p2.NewProblem, too_many_elements)
+                        self.p2.NewProblem, too_many_elements, 0)
 
     def test_new_problem_data_size_limit(self):
         huge_file_path = get_huge_file_path()
@@ -113,7 +113,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "type"        : "abrt-problems2-sanity"}
 
             self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Problem data is too big",
-                                  self.p2.NewProblem, description)
+                                  self.p2.NewProblem, description, 0)
 
 
 if __name__ == "__main__":

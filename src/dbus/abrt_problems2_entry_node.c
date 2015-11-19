@@ -145,7 +145,7 @@ static struct p2e_node *get_entry(GDBusConnection *connection,
     return node;
 }
 
-static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
+static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
                                      GVariant *elements, GUnixFDList *fd_list)
 {
     GVariantBuilder builder;
@@ -164,6 +164,9 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
             continue;
         }
 
+        /* Do ask me why -> see libreport xmalloc_read() */
+        size_t data_size = (INT_MAX - 4095);
+
         int elem_type = 0;
         char *data = NULL;
         int fd = -1;
@@ -177,9 +180,9 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
             continue;
         }
 
-        if (   ((flags & 0x04) && !(elem_type & CD_FLAG_TXT))
-            || ((flags & 0x08) && !(elem_type & CD_FLAG_BIGTXT))
-            || ((flags & 0x10) && !(elem_type & CD_FLAG_BIN))
+        if (   ((flags & P2E_READ_ONLY_TEXT)     && !(elem_type & CD_FLAG_TXT))
+            || ((flags & P2E_READ_ONLY_BIG_TEXT) && !(elem_type & CD_FLAG_BIGTXT))
+            || ((flags & P2E_READ_ONLY_BINARY)   && !(elem_type & CD_FLAG_BIN))
            )
         {
             log_debug("Element is not of the requested type: %s", name);
@@ -188,18 +191,21 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
             continue;
         }
 
-        if (   (flags & 0x1)
-            || (elem_type & CD_FLAG_BIGTXT)
-            || (elem_type & CD_FLAG_BIN))
+        if ((flags & P2E_READ_ALL_FD) || !(elem_type & CD_FLAG_TXT))
         {
             free(data);
+            log_debug("Rewinding file descriptor %d", fd);
             if (lseek(fd, 0, SEEK_SET))
             {
                 perror_msg("Failed to rewind file descriptor of %s", name);
                 close(fd);
                 continue;
             }
+        }
 
+        if (   (flags & P2E_READ_ALL_FD)
+            || (!(flags & P2E_READ_ALL_NO_FD) && !(elem_type & CD_FLAG_TXT)))
+        {
             GError *error = NULL;
             gint pos = g_unix_fd_list_append(fd_list, fd, &error);
             close(fd);
@@ -215,6 +221,19 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
             continue;
         }
 
+        if (!(elem_type & CD_FLAG_TXT))
+        {
+            data = xmalloc_read(fd, &data_size);
+            log_debug("Re-loaded entire element: %llu Bytes", (long long unsigned)data_size);
+        }
+
+        if (elem_type & CD_FLAG_BIN)
+        {
+            log_debug("Adding element binary data");
+            g_variant_builder_add(&builder, "{sv}", name, g_variant_new_fixed_array(G_VARIANT_TYPE_BYTE, data, data_size, sizeof(char)));
+            continue;
+        }
+
         log_debug("Adding element text data");
         g_variant_builder_add(&builder, "{sv}", name, g_variant_new_string(data));
         free(data);
@@ -226,7 +245,7 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
+int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
                                 GVariant *elements, GUnixFDList *fd_list,
                                 uid_t caller_uid, GError **error)
 {
@@ -304,11 +323,35 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
 
         const off_t base_size = dd_size - item_size;
 
-        if (g_variant_is_of_type(value, G_VARIANT_TYPE_STRING))
+        if (   g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)
+            || g_variant_is_of_type(value, G_VARIANT_TYPE_BYTESTRING))
         {
-            log_debug("Saving text element");
-            const char *data = g_variant_get_string(value, /*length*/NULL);
-            const off_t data_size = strlen(data);
+            off_t data_size = 0;
+            const char *data = NULL;
+            if (g_variant_is_of_type(value, G_VARIANT_TYPE_BYTESTRING))
+            {
+                log_debug("Saving binary element");
+                /* Using G_VARIANT_TYPE_BYTESTRING only to check the type. */
+                gsize n_elements = 0;
+                const gsize element_size = sizeof(guchar);
+                data = g_variant_get_fixed_array(value, &n_elements,
+                                        element_size);
+                data_size = n_elements * element_size;
+            }
+            else
+            {
+                log_debug("Saving text element");
+                gsize size = 0;
+                data = g_variant_get_string(value, &size);
+                if (size >= (1ULL << (8 * sizeof(off_t) - 1)))
+                {
+                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Cannot read huge text data");
+                    retval = -EINVAL;
+                    goto exit_loop_on_error;
+                }
+                data_size = (off_t)size;
+            }
 
             if (allowed_new_user_problem_entry(caller_uid, name, data) == false)
             {
@@ -332,7 +375,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
                 continue;
             }
 
-            dd_save_text(dd, name, data);
+            dd_save_binary(dd, name, data, data_size);
             dd_size = base_size + data_size;
         }
         else if (g_variant_is_of_type(value, G_VARIANT_TYPE_HANDLE))
@@ -498,8 +541,16 @@ static void dbus_method_call(GDBusConnection *connection,
 
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
-        gint flags;
+        gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
+
+        if ((flags & P2E_READ_ALL_FD) && (flags & P2E_READ_ALL_NO_FD))
+        {
+            g_dbus_method_invocation_return_error(invocation,
+                            G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                            "Failed to obtain the lock");
+            return;
+        }
 
         GUnixFDList *fd_list = g_unix_fd_list_new();
 
@@ -525,7 +576,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
-        gint flags;
+        gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);

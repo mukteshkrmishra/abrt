@@ -49,7 +49,17 @@ enum p2e_save_elements_flags
                     | P2E_DATA_SIZE_LIMIT_FATAL),
 };
 
-int abrt_problems2_entry_save_elements(struct dump_dir *dd, int flags,
+int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
         GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid, GError **error);
+
+enum p2e_read_elements_flags
+{
+    P2E_READ_ALL_FD             = 0x01,
+    P2E_READ_ALL_TYPES          = 0x02,
+    P2E_READ_ONLY_TEXT          = 0x04,
+    P2E_READ_ONLY_BIG_TEXT      = 0x08,
+    P2E_READ_ONLY_BINARY        = 0x10,
+    P2E_READ_ALL_NO_FD          = 0x20,
+};
 
 #endif/*ABRT_PROBLEMS2_ENTRY_NODE_H*/

@@ -18,15 +18,15 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
                        "uuid"        : None}
 
         description["duphash"] = description["uuid"] = "DEADBEEF"
-        one = self.p2.NewProblem(description)
+        one = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
 
         description["duphash"] = description["uuid"] = "81680083"
-        two = self.p2.NewProblem(description)
+        two = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
 
         description["duphash"] = description["uuid"] = "FFFFFFFF"
-        three = self.p2.NewProblem(description)
+        three = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
 
         p = self.p2.GetProblems()

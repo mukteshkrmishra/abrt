@@ -60,6 +60,13 @@ class TestReadElements(abrt_p2_testing.TestCase):
         finally:
             os.close(fd)
 
+    def test_read_byte_elements(self):
+        exp = { "bytes" : dbus.types.Array(bytearray([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF]), "y") }
+        p2e = Problems2Entry(self.bus, self.p2_entry_path)
+        elements = p2e.ReadElements(exp.keys(), 0x20)
+
+        self.assertDictContainsSubset(elements, exp)
+
 
 if __name__ == "__main__":
     abrt_p2_testing.main(TestReadElements)
