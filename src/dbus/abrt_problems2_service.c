@@ -35,7 +35,7 @@ static PolkitAuthority *g_polkit_authority;
  */
 struct user_info
 {
-    unsigned sessions;
+    GList *sessions;
     long unsigned problems;
     unsigned new_problems;
     time_t new_problem_last;
@@ -52,7 +52,8 @@ static void user_info_free(struct user_info *info)
     if (info == NULL)
         return;
 
-    info->sessions = (unsigned)-1;
+    g_list_free(info->sessions);
+    info->sessions = (void *)0xDAEDBEEF;
 
     free(info);
 }
@@ -225,13 +226,13 @@ static void session_object_destructor(struct abrt_problems2_object *obj)
     struct user_info *user = g_hash_table_lookup(g_connected_users,
                                             (gconstpointer)(gint64)uid);
 
-    if (user->sessions == 0)
+    if (user->sessions == NULL)
     {
         error_msg("BUG: destructing session object for user who does not have session opened");
         abort();
     }
 
-    user->sessions -= 1;
+    user->sessions = g_list_remove(user->sessions, session);
     abrt_problems2_session_node_free(session);
 }
 
@@ -244,7 +245,7 @@ static struct abrt_problems2_object *session_object_register(GDBusConnection *co
     struct user_info *user = g_hash_table_lookup(g_connected_users,
                                         (gconstpointer)(gint64)caller_uid);
 
-    if (user != NULL && user->sessions >= abrt_problems2_service_user_clients_limit(caller_uid))
+    if (user != NULL && g_list_length(user->sessions) >= abrt_problems2_service_user_clients_limit(caller_uid))
     {
         log_warning("User %lu reached the limit of opened sessions (%d)", (long unsigned)caller_uid, abrt_problems2_service_user_clients_limit(caller_uid));
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
@@ -277,7 +278,7 @@ static struct abrt_problems2_object *session_object_register(GDBusConnection *co
         g_hash_table_insert(g_connected_users, (gpointer)(gint64)caller_uid, user);
     }
 
-    ++user->sessions;
+    user->sessions = g_list_prepend(user->sessions, session);
 
     return obj;
 }
@@ -354,11 +355,8 @@ uid_t abrt_problems2_service_caller_uid(GDBusConnection *connection,
     return caller_uid;
 }
 
-uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
-        const char *caller,
-        GError **error)
+static GDBusProxy *get_dbus_proxy(GDBusConnection *connection, GError **error)
 {
-    guint caller_uid;
     if (g_proxy_dbus == NULL)
         g_proxy_dbus = g_dbus_proxy_new_sync(connection,
                                      G_DBUS_PROXY_FLAGS_NONE,
@@ -369,10 +367,20 @@ uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
                                      NULL,
                                      error);
 
+    return g_proxy_dbus;
+}
+
+uid_t abrt_problems2_service_caller_real_uid(GDBusConnection *connection,
+        const char *caller,
+        GError **error)
+{
+    guint caller_uid;
+    GDBusProxy *dbus_proxy = get_dbus_proxy(connection, error);
+
     if (g_proxy_dbus == NULL)
         return (uid_t) -1;
 
-    GVariant *result = g_dbus_proxy_call_sync(g_proxy_dbus,
+    GVariant *result = g_dbus_proxy_call_sync(dbus_proxy,
                                      "GetConnectionUnixUser",
                                      g_variant_new ("(s)", caller),
                                      G_DBUS_CALL_FLAGS_NONE,
@@ -558,6 +566,43 @@ static int bridge_register_dump_dir_entry_node(struct dump_dir *dd, void *connec
     return 0;
 }
 
+static void on_g_signal(GDBusProxy *proxy,
+        gchar      *sender_name,
+        gchar      *signal_name,
+        GVariant   *parameters,
+        gpointer    user_data)
+{
+    if (0 != strcmp(signal_name, "NameOwnerChanged"))
+        return;
+
+    const gchar *bus_name = NULL;
+    const gchar *old_owner = NULL;
+    const gchar *new_owner = NULL;
+
+    g_variant_get(parameters, "(&s&s&s)", &bus_name, &old_owner, &new_owner);
+
+    if (bus_name[0] == '\0' || old_owner[0] == '\0' || new_owner[0] != '\0')
+        return;
+
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, g_problems2_session_type.objects);
+
+    const char *p;
+    struct abrt_problems2_object *obj;
+    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
+    {
+        struct p2s_node *session = obj->node;
+        if (strcmp(bus_name, abrt_problems2_session_caller(session)) != 0)
+            continue;
+
+        log_debug("Caller '%s' disconnected without closing session: %s", bus_name, p);
+
+        GDBusConnection *connection = g_dbus_proxy_get_connection(proxy);
+        abrt_problems2_session_object_close(obj, connection);
+        abrt_problems2_object_destroy(obj, connection);
+    }
+}
+
 void abrt_problems2_service_register_objects(GDBusConnection *connection)
 {
     const int r = register_object(connection,
@@ -569,6 +614,11 @@ void abrt_problems2_service_register_objects(GDBusConnection *connection)
 
     if (r == 0)
         for_each_problem_in_dir(g_settings_dump_location, (uid_t)-1, bridge_register_dump_dir_entry_node, connection);
+
+    GError *error = NULL;
+    GDBusProxy *dbus_proxy = get_dbus_proxy(connection, &error);
+    if (dbus_proxy != NULL)
+        g_signal_connect(dbus_proxy, "g-signal", G_CALLBACK(on_g_signal), NULL);
 }
 
 int abrt_problems2_service_init(void)

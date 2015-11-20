@@ -27,9 +27,13 @@ struct p2s_node *abrt_problems2_session_node_new(char *caller, uid_t uid);
 void abrt_problems2_session_node_free(struct p2s_node *session);
 
 uid_t abrt_problems2_session_uid(struct p2s_node *session);
+const char *abrt_problems2_session_caller(struct p2s_node *session);
 int abrt_problems2_session_is_authorized(struct p2s_node *session);
 int abrt_problems2_session_check_sanity(struct p2s_node *session, const char *caller, uid_t caller_uid, GError **error);
 
 GDBusInterfaceVTable *abrt_problems2_session_node_vtable(void);
+
+struct abrt_problems2_object;
+void abrt_problems2_session_object_close(struct abrt_problems2_object *obj, GDBusConnection *connection);
 
 #endif/*ABRT_PROBLEMS2_SESSION_NODE*/

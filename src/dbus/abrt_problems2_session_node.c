@@ -212,27 +212,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("Close", method_name) == 0)
     {
-        switch(node->p2s_state)
-        {
-            case P2S_STATE_AUTH:
-                change_state(user_data, P2S_STATE_INIT, connection);
-                break;
-
-            case P2S_STATE_PENDING:
-                {
-                    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
-                    g_cancellable_cancel(node->p2s_auth_rq->cancellable);
-
-                    authorization_request_destroy(user_data);
-
-                    change_state(user_data, P2S_STATE_INIT, connection);
-                }
-                break;
-
-            case P2S_STATE_INIT:
-                /* pass */
-                break;
-        }
+        abrt_problems2_session_object_close(user_data, connection);
 
         g_dbus_method_invocation_return_value(invocation, NULL);
 
@@ -315,9 +295,39 @@ void abrt_problems2_session_node_free(struct p2s_node *node)
     node->p2s_caller = (void *)0xDEADBEEF;
 }
 
+void abrt_problems2_session_object_close(struct abrt_problems2_object *obj, GDBusConnection *connection)
+{
+    struct p2s_node *node = abrt_problems2_object_get_node(obj);
+    switch(node->p2s_state)
+    {
+        case P2S_STATE_AUTH:
+            change_state(obj, P2S_STATE_INIT, connection);
+            break;
+
+        case P2S_STATE_PENDING:
+            {
+                g_cancellable_cancel(node->p2s_auth_rq->cancellable);
+
+                authorization_request_destroy(obj);
+
+                change_state(obj, P2S_STATE_INIT, connection);
+            }
+            break;
+
+        case P2S_STATE_INIT:
+            /* pass */
+            break;
+    }
+}
+
 uid_t abrt_problems2_session_uid(struct p2s_node *session)
 {
     return session->p2s_uid;
+}
+
+const char *abrt_problems2_session_caller(struct p2s_node *session)
+{
+    return session->p2s_caller;
 }
 
 int abrt_problems2_session_is_authorized(struct p2s_node *session)
