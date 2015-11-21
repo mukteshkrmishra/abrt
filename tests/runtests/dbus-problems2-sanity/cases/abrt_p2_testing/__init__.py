@@ -315,15 +315,24 @@ def get_huge_file_path(size_kb=(DBUS_LIMIT_DATA_SIZE_KB + 1)):
 
     return huge_file_path
 
+def get_authorized_session(test, bus=None, session_path=None):
+    if bus is None:
+        bus = test.bus
 
-@contextmanager
-def authorize_session(test):
-    p2_session_path = test.p2.GetSession()
-    p2_session = Problems2Session(test.bus, p2_session_path)
-    with start_polkit_agent(test.root_bus, test.bus.get_unique_name()) as pk_agent:
+    if session_path is None:
+        session_path = test.p2.GetSession()
+
+    p2_session = Problems2Session(bus, session_path)
+
+    with start_polkit_agent(test.root_bus, bus.get_unique_name()) as pk_agent:
         pk_agent.set_replies([True])
         p2_session.Authorize(dict())
         test.wait_for_signals(["AuthorizationChanged"])
 
+    return p2_session
+
+@contextmanager
+def authorize_session(test, bus=None, session_path=None):
+    p2_session = get_authorized_session(test, bus, session_path)
     yield p2_session
     p2_session.Close()
