@@ -56,15 +56,13 @@ const char *abrt_p2_service_session_path(GDBusConnection *connection,
 uid_t abrt_p2_service_caller_uid(GDBusConnection *connection,
             const char *caller, GError **error);
 
-uid_t abrt_p2_service_caller_real_uid(GDBusConnection *connection,
-        const char *caller, GError **error);
+uid_t abrt_p2_service_caller_real_uid(const char *caller, GError **error);
 
 const char *abrt_p2_service_save_problem(GDBusConnection *connection,
             const char *type_str, GVariant *problem_info, GUnixFDList *fd_list,
             uid_t caller_uid, char **problem_id, GError **error);
 
-int abrt_p2_service_remove_problem(GDBusConnection *connection,
-            const char *entry_path, uid_t caller_uid, GError **error);
+int abrt_p2_service_remove_problem(const char *entry_path, uid_t caller_uid, GError **error);
 
 problem_data_t *abrt_p2_service_entry_problem_data(const char *entry_path,
         uid_t caller_uid, GError **error);

@@ -334,11 +334,9 @@ static struct abrt_p2_object *get_session_for_caller(GDBusConnection *connection
     return obj;
 }
 
-const char *abrt_p2_service_session_path(GDBusConnection *connection,
-        const char *caller,
-        GError **error)
+const char *abrt_p2_service_session_path(GDBusConnection *connection, const char *caller, GError **error)
 {
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(connection, caller, error);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(caller, error);
     if (caller_uid == (uid_t)-1)
         return NULL;
 
@@ -354,11 +352,9 @@ PolkitAuthority *abrt_p2_polkit_authority(void)
     return g_polkit_authority;
 }
 
-uid_t abrt_p2_service_caller_uid(GDBusConnection *connection,
-        const char *caller,
-        GError **error)
+uid_t abrt_p2_service_caller_uid(GDBusConnection *connection, const char *caller, GError **error)
 {
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(connection, caller, error);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(caller, error);
     if (caller_uid == (uid_t)-1)
         return (uid_t)-1;
 
@@ -373,9 +369,7 @@ uid_t abrt_p2_service_caller_uid(GDBusConnection *connection,
     return caller_uid;
 }
 
-uid_t abrt_p2_service_caller_real_uid(GDBusConnection *connection,
-        const char *caller,
-        GError **error)
+uid_t abrt_p2_service_caller_real_uid(const char *caller, GError **error)
 {
     guint caller_uid;
 
@@ -503,8 +497,7 @@ const char *abrt_p2_service_save_problem(GDBusConnection *connection,
     return entry_node_path;
 }
 
-int abrt_p2_service_remove_problem(GDBusConnection *connection,
-        const char *entry_path,
+int abrt_p2_service_remove_problem(const char *entry_path,
         uid_t caller_uid,
         GError **error)
 {

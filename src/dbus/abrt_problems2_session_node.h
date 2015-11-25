@@ -38,6 +38,9 @@ gint32 abrt_p2_session_authorize(AbrtP2Session *session);
 void abrt_p2_session_close(AbrtP2Session *session);
 int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid_t caller_uid, GError **error);
 
+const char *abrt_p2_session_locale(AbrtP2Session *session, char *locale);
+void abrt_p2_session_set_locale(AbrtP2Session *session, char *locale);
+
 GDBusInterfaceVTable *abrt_p2_session_vtable(void);
 
 G_END_DECLS
