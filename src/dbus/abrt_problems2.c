@@ -27,7 +27,7 @@ static void on_bus_acquired(GDBusConnection *connection,
                             const gchar     *name,
                             gpointer         user_data)
 {
-    abrt_problems2_service_register_objects(connection);
+    abrt_p2_service_register_objects(connection);
 }
 
 static void on_name_acquired(GDBusConnection *connection,
@@ -86,7 +86,7 @@ int main(int argc, char *argv[])
     if (getuid() != 0)
         error_msg_and_die("This program must be run as root.");
 
-    int r = abrt_problems2_service_init();
+    int r = abrt_p2_service_init();
     if (r != 0)
     {
         error_msg_and_die("Failed to initialize ABRT Problems2 service");
@@ -113,7 +113,7 @@ int main(int argc, char *argv[])
 
     g_bus_unown_name(owner_id);
 
-    abrt_problems2_service_uninit();
+    abrt_p2_service_uninit();
 
     free_abrt_conf_data();
 

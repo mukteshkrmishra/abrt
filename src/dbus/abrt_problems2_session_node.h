@@ -19,21 +19,27 @@
 #ifndef ABRT_PROBLEMS2_SESSION_NODE
 #define ABRT_PROBLEMS2_SESSION_NODE
 
+#include <glib-object.h>
 #include <gio/gio.h>
 
-struct p2s_node;
+G_BEGIN_DECLS
 
-struct p2s_node *abrt_problems2_session_node_new(char *caller, uid_t uid);
-void abrt_problems2_session_node_free(struct p2s_node *session);
+#define TYPE_ABRT_P2_SESSION abrt_p2_session_get_type ()
+G_DECLARE_FINAL_TYPE(AbrtP2Session, abrt_p2_session, ABRT_P2, SESSION, GObject)
 
-uid_t abrt_problems2_session_uid(struct p2s_node *session);
-const char *abrt_problems2_session_caller(struct p2s_node *session);
-int abrt_problems2_session_is_authorized(struct p2s_node *session);
-int abrt_problems2_session_check_sanity(struct p2s_node *session, const char *caller, uid_t caller_uid, GError **error);
+AbrtP2Session *abrt_p2_session_new(char *caller, uid_t uid);
 
-GDBusInterfaceVTable *abrt_problems2_session_node_vtable(void);
+uid_t abrt_p2_session_uid(AbrtP2Session *session);
+const char *abrt_p2_session_caller(AbrtP2Session *session);
+int abrt_p2_session_is_authorized(AbrtP2Session *session);
 
-struct abrt_problems2_object;
-void abrt_problems2_session_object_close(struct abrt_problems2_object *obj, GDBusConnection *connection);
+
+gint32 abrt_p2_session_authorize(AbrtP2Session *session);
+void abrt_p2_session_close(AbrtP2Session *session);
+int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid_t caller_uid, GError **error);
+
+GDBusInterfaceVTable *abrt_p2_session_vtable(void);
+
+G_END_DECLS
 
 #endif/*ABRT_PROBLEMS2_SESSION_NODE*/

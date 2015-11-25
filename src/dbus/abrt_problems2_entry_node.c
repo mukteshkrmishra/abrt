@@ -19,38 +19,55 @@
 #include "libabrt.h"
 #include "abrt_problems2_entry_node.h"
 #include "abrt_problems2_service.h"
+
 #include <gio/gunixfdlist.h>
 
-struct p2e_node
+typedef struct
 {
     char *p2e_dirname;
+} AbrtP2EntryPrivate;
+
+struct _AbrtP2Entry
+{
+    GObject parent_instance;
+    AbrtP2EntryPrivate *pv;
 };
 
-struct p2e_node *abrt_problems2_entry_node_new(char *dirname)
+G_DEFINE_TYPE_WITH_PRIVATE(AbrtP2Entry, abrt_p2_entry, G_TYPE_OBJECT)
+
+static void abrt_p2_entry_finalize(GObject *gobject)
 {
-    struct p2e_node *entry = xmalloc(sizeof(*entry));
-    entry->p2e_dirname = dirname;
+    AbrtP2EntryPrivate *pv = abrt_p2_entry_get_instance_private(ABRT_P2_ENTRY(gobject));
+    free(pv->p2e_dirname);
+}
+
+static void abrt_p2_entry_class_init(AbrtP2EntryClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = abrt_p2_entry_finalize;
+}
+
+static void abrt_p2_entry_init(AbrtP2Entry *self)
+{
+    self->pv = abrt_p2_entry_get_instance_private(self);
+}
+
+AbrtP2Entry *abrt_p2_entry_new(char *dirname)
+{
+    AbrtP2Entry *entry = g_object_new(TYPE_ABRT_P2_ENTRY, NULL);
+    entry->pv->p2e_dirname = dirname;
 
     return entry;
 }
 
-void abrt_problems2_entry_node_free(struct p2e_node *entry)
+int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid, struct dump_dir **dd)
 {
-    if (entry == NULL)
-        return;
-
-    free(entry->p2e_dirname);
-    entry->p2e_dirname = (void *)0xDEADBEEF;
-}
-
-int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t uid, struct dump_dir **dd)
-{
-    struct dump_dir *tmp = dd_opendir(entry->p2e_dirname,   DD_OPEN_FD_ONLY
+    struct dump_dir *tmp = dd_opendir(entry->pv->p2e_dirname,   DD_OPEN_FD_ONLY
                                                           | DD_FAIL_QUIETLY_ENOENT
                                                           | DD_FAIL_QUIETLY_EACCES);
     if (tmp == NULL)
     {
-        VERB2 perror_msg("can't open problem directory '%s'", entry->p2e_dirname);
+        VERB2 perror_msg("can't open problem directory '%s'", entry->pv->p2e_dirname);
         return -ENOTDIR;
     }
 
@@ -64,10 +81,10 @@ int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t ui
     return ret;
 }
 
-int abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error)
+int abrt_p2_entry_remove(AbrtP2Entry *entry, uid_t caller_uid, GError **error)
 {
     struct dump_dir *dd = NULL;
-    int ret = abrt_problems2_entry_node_accessible_by_uid(entry, caller_uid, &dd);
+    int ret = abrt_p2_entry_accessible_by_uid(entry, caller_uid, &dd);
     if (ret != 0)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
@@ -95,11 +112,11 @@ int abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, G
     return ret;
 }
 
-problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, uid_t caller_uid, GError **error)
+problem_data_t *abrt_p2_entry_problem_data(AbrtP2Entry *node, uid_t caller_uid, GError **error)
 {
     struct dump_dir *dd = NULL;
 
-    if (abrt_problems2_entry_node_accessible_by_uid(node, caller_uid, &dd) != 0)
+    if (abrt_p2_entry_accessible_by_uid(node, caller_uid, &dd) != 0)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
                     "You are not authorized to access the problem");
@@ -120,14 +137,14 @@ problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, ui
     return pd;
 }
 
-static struct p2e_node *get_entry(GDBusConnection *connection,
-                          struct abrt_problems2_object *object,
+static AbrtP2Entry *get_entry(GDBusConnection *connection,
+                          struct abrt_p2_object *object,
                           uid_t caller_uid,
                           const gchar *object_path,
                           struct dump_dir **dd,
                           GError **error)
 {
-    struct p2e_node *node = abrt_problems2_object_get_node(object);
+    AbrtP2Entry *node = abrt_p2_object_get_node(object);
     if (node == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
@@ -135,7 +152,7 @@ static struct p2e_node *get_entry(GDBusConnection *connection,
         return NULL;
     }
 
-    if (0 != abrt_problems2_entry_node_accessible_by_uid(node, caller_uid, dd))
+    if (0 != abrt_p2_entry_accessible_by_uid(node, caller_uid, dd))
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
                     "You are not authorized to access the problem");
@@ -180,9 +197,9 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
             continue;
         }
 
-        if (   ((flags & P2E_READ_ONLY_TEXT)     && !(elem_type & CD_FLAG_TXT))
-            || ((flags & P2E_READ_ONLY_BIG_TEXT) && !(elem_type & CD_FLAG_BIGTXT))
-            || ((flags & P2E_READ_ONLY_BINARY)   && !(elem_type & CD_FLAG_BIN))
+        if (   ((flags & ABRT_P2_ENTRY_READ_ONLY_TEXT)     && !(elem_type & CD_FLAG_TXT))
+            || ((flags & ABRT_P2_ENTRY_READ_ONLY_BIG_TEXT) && !(elem_type & CD_FLAG_BIGTXT))
+            || ((flags & ABRT_P2_ENTRY_READ_ONLY_BINARY)   && !(elem_type & CD_FLAG_BIN))
            )
         {
             log_debug("Element is not of the requested type: %s", name);
@@ -191,7 +208,7 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
             continue;
         }
 
-        if ((flags & P2E_READ_ALL_FD) || !(elem_type & CD_FLAG_TXT))
+        if ((flags & ABRT_P2_ENTRY_READ_ALL_FD) || !(elem_type & CD_FLAG_TXT))
         {
             free(data);
             log_debug("Rewinding file descriptor %d", fd);
@@ -203,8 +220,8 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
             }
         }
 
-        if (   (flags & P2E_READ_ALL_FD)
-            || (!(flags & P2E_READ_ALL_NO_FD) && !(elem_type & CD_FLAG_TXT)))
+        if (   (flags & ABRT_P2_ENTRY_READ_ALL_FD)
+            || (!(flags & ABRT_P2_ENTRY_READ_ALL_NO_FD) && !(elem_type & CD_FLAG_TXT)))
         {
             GError *error = NULL;
             gint pos = g_unix_fd_list_append(fd_list, fd, &error);
@@ -245,7 +262,7 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
+int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
                                 GVariant *elements, GUnixFDList *fd_list,
                                 uid_t caller_uid, GError **error)
 {
@@ -257,8 +274,8 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
     g_variant_iter_init(&iter, elements);
 
     /* Implement global size constraints */
-    const int elements_limit = abrt_problems2_service_elements_limit(caller_uid);
-    const off_t dd_size_limit = abrt_problems2_service_dd_size_limit(caller_uid);
+    const int elements_limit = abrt_p2_service_elements_limit(caller_uid);
+    const off_t dd_size_limit = abrt_p2_service_dd_size_limit(caller_uid);
 
     off_t dd_size = dd_compute_size(dd, /*no flags*/0);
     if (dd_size < 0)
@@ -297,7 +314,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             if (elements_limit != 0 && dd_items >= elements_limit)
             {
                 error_msg("Cannot create new element '%s': reached the limit for elements %u", name, elements_limit);
-                if (flags & P2E_ELEMENTS_COUNT_LIMIT_FATAL)
+                if (flags & ABRT_P2_ENTRY_ELEMENTS_COUNT_LIMIT_FATAL)
                     goto exit_loop_on_too_many_elements;
                 continue;
             }
@@ -310,7 +327,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             if (item_size < 0)
             {
                 error_msg("Failed to get size of element '%s'", name);
-                if (flags & P2E_IO_ERROR_FATAL)
+                if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
                 {
                     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
                             "Failed to get size of underlying data");
@@ -370,7 +387,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
                 && base_size + data_size > dd_size_limit)
             {
                 error_msg("Cannot save text element: problem data size limit %ld", dd_size_limit);
-                if (flags & P2E_DATA_SIZE_LIMIT_FATAL)
+                if (flags & ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL)
                     goto exit_loop_on_too_big_data;
                 continue;
             }
@@ -398,7 +415,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             if (*error != NULL)
             {
                 error_msg("Failed to get file descriptor of %s: %s", name, (*error)->message);
-                if (flags & P2E_IO_ERROR_FATAL)
+                if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
                 {
                     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
                             "Failed to get passed file descriptor");
@@ -416,7 +433,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             if (r < 0)
             {
                 error_msg("Failed to save file descriptor");
-                if (flags & P2E_IO_ERROR_FATAL)
+                if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
                 {
                     g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
                             "Failed to save data of passed file descriptor");
@@ -429,7 +446,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             if (r >= max_size)
             {
                 error_msg("File descriptor was truncated due to size limit");
-                if (flags & P2E_DATA_SIZE_LIMIT_FATAL)
+                if (flags & ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL)
                     goto exit_loop_on_too_big_data;
 
                 /* the file has been created and its size is 'max_size' */
@@ -441,7 +458,7 @@ int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
         else
         {
             error_msg("Unsupported type: %s", g_variant_get_type_string(value));
-            if (flags & P2E_IO_ERROR_FATAL)
+            if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
             {
                 g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_NOT_SUPPORTED,
                         "Not supported D-Bus type");
@@ -501,7 +518,7 @@ static void dbus_method_call(GDBusConnection *connection,
     log_debug("Problems2.Entry method : %s", method_name);
 
     GError *error = NULL;
-    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    uid_t caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
     if (caller_uid == (uid_t)-1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -510,7 +527,7 @@ static void dbus_method_call(GDBusConnection *connection,
     }
 
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, user_data, caller_uid, object_path, &dd, &error);
+    AbrtP2Entry *node = get_entry(connection, user_data, caller_uid, object_path, &dd, &error);
     if (node == NULL)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -544,7 +561,7 @@ static void dbus_method_call(GDBusConnection *connection,
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        if ((flags & P2E_READ_ALL_FD) && (flags & P2E_READ_ALL_NO_FD))
+        if ((flags & ABRT_P2_ENTRY_READ_ALL_FD) && (flags & ABRT_P2_ENTRY_READ_ALL_NO_FD))
         {
             g_dbus_method_invocation_return_error(invocation,
                             G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
@@ -582,7 +599,7 @@ static void dbus_method_call(GDBusConnection *connection,
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        int r = abrt_problems2_entry_save_elements(dd, flags, elements, fd_list, caller_uid, &error);
+        int r = abrt_p2_entry_save_elements(dd, flags, elements, fd_list, caller_uid, &error);
         if (r != 0)
         {
             g_dbus_method_invocation_return_gerror(invocation, error);
@@ -655,13 +672,13 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 {
     log_debug("Problems2.Entry get property : %s", property_name);
 
-    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, error);
+    uid_t caller_uid = abrt_p2_service_caller_uid(connection, caller, error);
     if (caller_uid == (uid_t)-1)
         return NULL;
 
     GVariant *retval;
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, user_data, caller_uid, object_path, &dd, error);
+    AbrtP2Entry *node = get_entry(connection, user_data, caller_uid, object_path, &dd, error);
     if (node == NULL)
         return NULL;
 
@@ -815,12 +832,12 @@ static gboolean dbus_set_property(GDBusConnection *connection,
 {
     log_debug("Problems2.Entry set property : %s", property_name);
 
-    uid_t caller_uid = abrt_problems2_service_caller_uid(connection, caller, error);
+    uid_t caller_uid = abrt_p2_service_caller_uid(connection, caller, error);
     if (caller_uid == (uid_t)-1)
         return FALSE;
 
     struct dump_dir *dd;
-    struct p2e_node *node = get_entry(connection, user_data, caller, object_path, &dd, error);
+    AbrtP2Entry *node = get_entry(connection, user_data, caller, object_path, &dd, error);
     if (node == NULL)
         return FALSE;
 
@@ -947,7 +964,7 @@ static gboolean dbus_set_property(GDBusConnection *connection,
 }
 #endif/*PROBLEMS2_PROPERTY_SET*/
 
-GDBusInterfaceVTable *abrt_problems2_entry_node_vtable(void)
+GDBusInterfaceVTable *abrt_p2_entry_vtable(void)
 {
     static GDBusInterfaceVTable default_vtable =
     {

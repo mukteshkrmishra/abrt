@@ -61,6 +61,7 @@ rlJournalStart
     rlPhaseStartTest
         for test_fixture in `ls cases/test_*.py`
         do
+            rlLog "`which abrt-dbus`"
             abrt-dbus -vvv -t 100 &> abrt_dbus_${test_fixture#cases/}.log &
             ABRT_DBUS_PID=$!
 

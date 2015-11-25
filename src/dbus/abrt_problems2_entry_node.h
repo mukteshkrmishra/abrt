@@ -15,51 +15,57 @@
   with this program; if not, write to the Free Software Foundation, Inc.,
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
-#ifndef ABRT_PROBLEMS2_ENTRY_NODE_H
-#define ABRT_PROBLEMS2_ENTRY_NODE_H
+#ifndef abrt_p2_entry_H
+#define abrt_p2_entry_H
 
 #include "libabrt.h"
 
+#include <glib-object.h>
 #include <gio/gio.h>
 
-struct p2e_node;
+G_BEGIN_DECLS
 
-struct p2e_node *abrt_problems2_entry_node_new(char *dirname);
-int  abrt_problems2_entry_node_remove(struct p2e_node *entry, uid_t caller_uid, GError **error);
-void abrt_problems2_entry_node_free(struct p2e_node *entry);
-int abrt_problems2_entry_node_accessible_by_uid(struct p2e_node *entry, uid_t uid, struct dump_dir **dd);
-problem_data_t *abrt_problems2_entry_node_problem_data(struct p2e_node *node, uid_t caller_uid, GError **error);
+#define TYPE_ABRT_P2_ENTRY abrt_p2_entry_get_type ()
+G_DECLARE_FINAL_TYPE(AbrtP2Entry, abrt_p2_entry, ABRT_P2, ENTRY, GObject)
 
-GDBusInterfaceVTable *abrt_problems2_entry_node_vtable(void);
+AbrtP2Entry *abrt_p2_entry_new(char *dirname);
+
+int  abrt_p2_entry_remove(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
+int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid, struct dump_dir **dd);
+problem_data_t *abrt_p2_entry_problem_data(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
+
+GDBusInterfaceVTable *abrt_p2_entry_vtable(void);
 
 
 /*
  * Utility functions
  */
-enum p2e_save_elements_flags
+enum AbrP2EntrySaveElementsFlags
 {
-    P2E_IO_ERROR_FATAL             = (1 << 0),
-    P2E_UNSUPPORTED_ERROR_FATAL    = (1 << 1),
-    P2E_ELEMENTS_COUNT_LIMIT_FATAL = (1 << 2),
-    P2E_DATA_SIZE_LIMIT_FATAL      = (1 << 3),
+    ABRT_P2_ENTRY_IO_ERROR_FATAL             = (1 << 0),
+    ABRT_P2_ENTRY_UNSUPPORTED_ERROR_FATAL    = (1 << 1),
+    ABRT_P2_ENTRY_ELEMENTS_COUNT_LIMIT_FATAL = (1 << 2),
+    ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL      = (1 << 3),
 
-    P2E_ALL_FATAL =(  P2E_IO_ERROR_FATAL
-                    | P2E_UNSUPPORTED_ERROR_FATAL
-                    | P2E_ELEMENTS_COUNT_LIMIT_FATAL
-                    | P2E_DATA_SIZE_LIMIT_FATAL),
+    ABRT_P2_ENTRY_ALL_FATAL =(  ABRT_P2_ENTRY_IO_ERROR_FATAL
+                    | ABRT_P2_ENTRY_UNSUPPORTED_ERROR_FATAL
+                    | ABRT_P2_ENTRY_ELEMENTS_COUNT_LIMIT_FATAL
+                    | ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL),
 };
 
-int abrt_problems2_entry_save_elements(struct dump_dir *dd, gint32 flags,
+int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
         GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid, GError **error);
 
-enum p2e_read_elements_flags
+enum AbrtP2EntryReadElementsFlags
 {
-    P2E_READ_ALL_FD             = 0x01,
-    P2E_READ_ALL_TYPES          = 0x02,
-    P2E_READ_ONLY_TEXT          = 0x04,
-    P2E_READ_ONLY_BIG_TEXT      = 0x08,
-    P2E_READ_ONLY_BINARY        = 0x10,
-    P2E_READ_ALL_NO_FD          = 0x20,
+    ABRT_P2_ENTRY_READ_ALL_FD             = 0x01,
+    ABRT_P2_ENTRY_READ_ALL_TYPES          = 0x02,
+    ABRT_P2_ENTRY_READ_ONLY_TEXT          = 0x04,
+    ABRT_P2_ENTRY_READ_ONLY_BIG_TEXT      = 0x08,
+    ABRT_P2_ENTRY_READ_ONLY_BINARY        = 0x10,
+    ABRT_P2_ENTRY_READ_ALL_NO_FD          = 0x20,
 };
 
-#endif/*ABRT_PROBLEMS2_ENTRY_NODE_H*/
+G_END_DECLS
+
+#endif/*abrt_p2_entry_H*/

@@ -8,6 +8,25 @@
 
 #define STRINGIZE(literal) #literal
 
+struct _AbrtP2
+{
+    GObject parent_instance;
+};
+
+G_DEFINE_TYPE(AbrtP2, abrt_p2, G_TYPE_OBJECT)
+
+static void abrt_p2_class_init(AbrtP2Class *klass)
+{
+}
+
+static void abrt_p2_init(AbrtP2 *self)
+{
+}
+
+AbrtP2*abrt_p2__new(char *dirname)
+{
+    return  g_object_new(TYPE_ABRT_P2, NULL);
+}
 
 static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
 {
@@ -129,7 +148,7 @@ static const char *handle_NewProblem(GDBusConnection *connection,
 
     GVariant *real_problem_info = g_variant_dict_end(&pd);
 
-    new_path = abrt_problems2_service_save_problem(connection, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
+    new_path = abrt_p2_service_save_problem(connection, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
 
     g_variant_unref(real_problem_info);
     free(type_str);
@@ -166,7 +185,7 @@ static void dbus_method_call(GDBusConnection *connection,
     GVariant *response;
 
     GError *error = NULL;
-    caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
     if (caller_uid == (uid_t) -1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -175,7 +194,7 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("NewProblem", method_name) == 0)
     {
-        int r = abrt_problems2_service_allowed_new_problem(caller_uid);
+        int r = abrt_p2_service_allowed_new_problem(caller_uid);
         if (r == 0)
         {
             g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
@@ -225,7 +244,7 @@ static void dbus_method_call(GDBusConnection *connection,
     else if (strcmp("GetSession", method_name) == 0)
     {
         GError *error = NULL;
-        const char *session_path = abrt_problems2_service_session_path(connection, caller, &error);
+        const char *session_path = abrt_p2_service_session_path(connection, caller, &error);
 
         if (!session_path)
         {
@@ -245,7 +264,7 @@ static void dbus_method_call(GDBusConnection *connection,
         GVariantBuilder builder;
         g_variant_builder_init(&builder, G_VARIANT_TYPE("ao"));
 
-        GList *problem_nodes = abrt_problems2_service_get_problems_nodes(caller_uid);
+        GList *problem_nodes = abrt_p2_service_get_problems_nodes(caller_uid);
         for (GList *p = problem_nodes; p != NULL; p = g_list_next(p))
             g_variant_builder_add(&builder, "o", (char*)p->data);
         g_list_free(problem_nodes);
@@ -263,7 +282,7 @@ static void dbus_method_call(GDBusConnection *connection,
         g_variant_get(parameters, "(&o)", &entry_path);
 
         GError *error = NULL;
-        problem_data_t *pd = abrt_problems2_service_entry_problem_data(entry_path, caller_uid, &error);
+        problem_data_t *pd = abrt_p2_service_entry_problem_data(entry_path, caller_uid, &error);
         if (NULL == pd)
         {
             g_dbus_method_invocation_return_gerror(invocation, error);
@@ -312,7 +331,7 @@ static void dbus_method_call(GDBusConnection *connection,
         g_variant_get(array, "ao", &iter);
         while (g_variant_iter_loop(iter, "o", &entry_node))
         {
-            if (abrt_problems2_service_remove_problem(connection, entry_node, caller_uid, &error) != 0)
+            if (abrt_p2_service_remove_problem(connection, entry_node, caller_uid, &error) != 0)
             {
                 g_dbus_method_invocation_return_gerror(invocation, error);
                 g_error_free(error);
@@ -330,7 +349,7 @@ static void dbus_method_call(GDBusConnection *connection,
             "The method has to be implemented");
 }
 
-GDBusInterfaceVTable *abrt_problems2_node_vtable(void)
+GDBusInterfaceVTable *abrt_p2_vtable(void)
 {
     static GDBusInterfaceVTable default_vtable =
     {

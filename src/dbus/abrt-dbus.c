@@ -350,7 +350,7 @@ static void handle_method_call(GDBusConnection *connection,
     GVariant *response;
 
     GError *error = NULL;
-    caller_uid = abrt_problems2_service_caller_uid(connection, caller, &error);
+    caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
     if (caller_uid == (uid_t) -1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -814,7 +814,7 @@ static void on_bus_acquired(GDBusConnection *connection,
                                                        NULL); /* GError** */
     g_assert(registration_id > 0);
 
-    abrt_problems2_service_register_objects(connection);
+    abrt_p2_service_register_objects(connection);
 
     reset_timeout();
 }
@@ -889,7 +889,7 @@ int main(int argc, char *argv[])
     if (err != NULL)
         error_msg_and_die("Invalid D-Bus interface: %s", err->message);
 
-    int r = abrt_problems2_service_init();
+    int r = abrt_p2_service_init();
     if (r != 0)
         error_msg_and_die("Failed to initialize Problems2 service: %s", err->message);
 
@@ -912,7 +912,7 @@ int main(int argc, char *argv[])
 
     g_bus_unown_name(owner_id);
 
-    abrt_problems2_service_uninit();
+    abrt_p2_service_uninit();
     g_dbus_node_info_unref(introspection_data);
 
     free_abrt_conf_data();

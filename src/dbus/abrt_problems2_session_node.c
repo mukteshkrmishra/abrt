@@ -23,55 +23,104 @@
 
 #include <assert.h>
 
-struct check_auth_cb_params
-{
-    struct abrt_problems2_object *obj;
-    GDBusConnection *connection;
-    GCancellable *cancellable;
-};
-
-struct p2s_node
+typedef struct
 {
     char   *p2s_caller;
     uid_t   p2s_uid;
     int     p2s_state;
     time_t  p2s_stamp;
     struct check_auth_cb_params *p2s_auth_rq;
-};
+} AbrtP2SessionPrivate;
 
 enum
 {
-    P2S_STATE_INIT,
-    P2S_STATE_PENDING,
-    P2S_STATE_AUTH,
+    ABRT_P2_SESSION_STATE_INIT,
+    ABRT_P2_SESSION_STATE_PENDING,
+    ABRT_P2_SESSION_STATE_AUTH,
 };
 
-static void change_state(struct abrt_problems2_object *obj, int new_state, GDBusConnection *connection)
+struct _AbrtP2Session
 {
-    struct p2s_node *node = abrt_problems2_object_get_node(obj);
-    if (node->p2s_state == new_state)
+    GObject parent_instance;
+    AbrtP2SessionPrivate *pv;
+
+   void (*authorization_changed)(AbrtP2Session *session, gint32 status);
+};
+
+G_DEFINE_TYPE_WITH_PRIVATE(AbrtP2Session, abrt_p2_session, G_TYPE_OBJECT)
+
+struct check_auth_cb_params
+{
+    AbrtP2Session *session;
+    GDBusConnection *connection;
+    GCancellable *cancellable;
+};
+
+enum {
+    SN_AUTHORIZATION_CHANGED,
+    SN_LAST_SIGNAL
+} SignalNumber;
+
+static guint s_signals[SN_LAST_SIGNAL] = { 0 };
+
+static void abrt_p2_session_finalize(GObject *gobject)
+{
+    AbrtP2SessionPrivate *pv = abrt_p2_session_get_instance_private(ABRT_P2_SESSION(gobject));
+    free(pv->p2s_caller);
+}
+
+static void abrt_p2_session_class_init(AbrtP2SessionClass *klass)
+{
+    GObjectClass *object_class = G_OBJECT_CLASS(klass);
+    object_class->finalize = abrt_p2_session_finalize;
+
+    s_signals[SN_AUTHORIZATION_CHANGED] = g_signal_new ("authorization-changed",
+                             G_TYPE_FROM_CLASS (klass),
+                             G_SIGNAL_RUN_LAST,
+                             G_STRUCT_OFFSET(struct _AbrtP2Session, authorization_changed),
+                             /*accumulator*/NULL, /*accu_data*/NULL,
+                             g_cclosure_marshal_VOID__VOID,
+                             G_TYPE_NONE,
+                             /*n_params*/1,
+                             G_TYPE_INT);
+}
+
+static void abrt_p2_session_init(AbrtP2Session *self)
+{
+    self->pv = abrt_p2_session_get_instance_private(self);
+}
+
+static void
+emit_authorization_changed(AbrtP2Session *session, gint32 status)
+{
+    g_signal_emit(session, s_signals[SN_AUTHORIZATION_CHANGED], 0, status);
+}
+
+static void change_state(AbrtP2Session *session, int new_state)
+{
+    if (session->pv->p2s_state == new_state)
         return;
 
     int value = -1;
-    int old_state = node->p2s_state;
-    node->p2s_state = new_state;
+    int old_state = session->pv->p2s_state;
+    session->pv->p2s_state = new_state;
 
-    if      (old_state == P2S_STATE_INIT    && new_state == P2S_STATE_PENDING)
+    if      (old_state == ABRT_P2_SESSION_STATE_INIT    && new_state == ABRT_P2_SESSION_STATE_PENDING)
     {
         log_debug("Authorization request is pending");
         value = 1;
     }
-    else if (old_state == P2S_STATE_PENDING && new_state == P2S_STATE_AUTH)
+    else if (old_state == ABRT_P2_SESSION_STATE_PENDING && new_state == ABRT_P2_SESSION_STATE_AUTH)
     {
         log_debug("Authorization has been acquired");
         value = 0;
     }
-    else if (old_state == P2S_STATE_AUTH    && new_state == P2S_STATE_INIT)
+    else if (old_state == ABRT_P2_SESSION_STATE_AUTH    && new_state == ABRT_P2_SESSION_STATE_INIT)
     {
         log_debug("Authorization request has been lost");
         value = 2;
     }
-    else if (old_state == P2S_STATE_PENDING && new_state == P2S_STATE_INIT)
+    else if (old_state == ABRT_P2_SESSION_STATE_PENDING && new_state == ABRT_P2_SESSION_STATE_INIT)
     {
         log_debug("Authorization request has failed");
         value = 3;
@@ -79,23 +128,20 @@ static void change_state(struct abrt_problems2_object *obj, int new_state, GDBus
     else
         goto forgotten_state;
 
-    GVariant *parameters = g_variant_new("(i)", value);
-    abrt_problems2_object_emit_signal(obj, "AuthorizationChanged", parameters, connection);
+    emit_authorization_changed(session, value);
     return;
 
 forgotten_state:
-    error_msg("BUG: unsupported state, current : %d, new : %d", node->p2s_state, new_state);
+    error_msg("BUG: unsupported state, current : %d, new : %d", session->pv->p2s_state, new_state);
 }
 
-void authorization_request_destroy(struct abrt_problems2_object *obj)
+static void authorization_request_destroy(AbrtP2Session *session)
 {
-    struct p2s_node *node = abrt_problems2_object_get_node(obj);
+    g_object_unref(session->pv->p2s_auth_rq->cancellable);
+    session->pv->p2s_auth_rq->cancellable = (void *)0xDEADBEEF;
 
-    g_object_unref(node->p2s_auth_rq->cancellable);
-    node->p2s_auth_rq->cancellable = (void *)0xDEADBEEF;
-
-    free(node->p2s_auth_rq);
-    node->p2s_auth_rq = NULL;
+    free(session->pv->p2s_auth_rq);
+    session->pv->p2s_auth_rq = NULL;
 }
 
 void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer user_data)
@@ -104,39 +150,36 @@ void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer u
     PolkitAuthorizationResult *result = NULL;
     result = polkit_authority_check_authorization_finish(POLKIT_AUTHORITY(source), res, &error);
 
-    int new_state = P2S_STATE_INIT;
+    int new_state = ABRT_P2_SESSION_STATE_INIT;
     if (result == NULL)
     {
        error_msg("Polkit authorization failed: %s", error->message);
        g_error_free(error);
     }
     else if (polkit_authorization_result_get_is_authorized(result))
-        new_state = P2S_STATE_AUTH;
+        new_state = ABRT_P2_SESSION_STATE_AUTH;
     else
         log_debug("Not authorized");
 
     g_object_unref(result);
 
     struct check_auth_cb_params *params = (struct check_auth_cb_params *)user_data;
-    change_state(params->obj, new_state, params->connection);
+    change_state(params->session, new_state);
 
     /* Invalidates args/params !!! */
-    authorization_request_destroy(params->obj);
+    authorization_request_destroy(params->session);
 }
 
-void authorization_request_initialize(struct abrt_problems2_object *obj, GDBusConnection *connection)
+void authorization_request_initialize(AbrtP2Session *session)
 {
-    struct p2s_node *node = abrt_problems2_object_get_node(obj);
-
     struct check_auth_cb_params *auth_rq = xmalloc(sizeof(*auth_rq));
-    auth_rq->obj = obj;
-    auth_rq->connection = connection;
+    auth_rq->session = session;
     auth_rq->cancellable = g_cancellable_new();
-    node->p2s_auth_rq = auth_rq;
-    change_state(obj, P2S_STATE_PENDING, connection);
+    session->pv->p2s_auth_rq = auth_rq;
+    change_state(session, ABRT_P2_SESSION_STATE_PENDING);
 
-    PolkitSubject *subject = polkit_system_bus_name_new(node->p2s_caller);
-    polkit_authority_check_authorization(abrt_problems2_polkit_authority(),
+    PolkitSubject *subject = polkit_system_bus_name_new(session->pv->p2s_caller);
+    polkit_authority_check_authorization(abrt_p2_polkit_authority(),
                 subject,
                 "org.freedesktop.problems.getall",
                 /* TODO: polkit.message */ NULL,
@@ -169,7 +212,7 @@ static void dbus_method_call(GDBusConnection *connection,
     //GVariant *response;
     GError *error = NULL;
 
-    uid_t caller_uid = abrt_problems2_service_caller_real_uid(connection, caller, &error);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(connection, caller, &error);
     if (caller_uid == (uid_t)-1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -177,8 +220,8 @@ static void dbus_method_call(GDBusConnection *connection,
         return;
     }
 
-    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
-    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, &error) != 0)
+    AbrtP2Session *session = abrt_p2_object_get_node(user_data);
+    if (abrt_p2_session_check_sanity(session, caller, caller_uid, &error) != 0)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
         g_error_free(error);
@@ -187,36 +230,30 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("Authorize", method_name) == 0)
     {
-        int retval = -1;
+        const gint32 retval = abrt_p2_session_authorize(session);
 
-        switch(node->p2s_state)
+        if (retval < 0)
         {
-            case P2S_STATE_INIT:
-                authorization_request_initialize(user_data, connection);
-                retval = 1;
-                break;
-
-            case P2S_STATE_PENDING:
-                retval = 2;
-                break;
-
-            case P2S_STATE_AUTH:
-                retval = 0;
-                break;
+            g_dbus_method_invocation_return_error(invocation,
+                            G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                            "Failed authorize Session");
+        }
+        else
+        {
+            GVariant *response = g_variant_new("(i)", retval);
+            g_dbus_method_invocation_return_value(invocation, response);
         }
 
-        GVariant *response = g_variant_new("(i)", retval);
-        g_dbus_method_invocation_return_value(invocation, response);
         return;
     }
 
     if (strcmp("Close", method_name) == 0)
     {
-        abrt_problems2_session_object_close(user_data, connection);
+        abrt_p2_session_close(session);
 
         g_dbus_method_invocation_return_value(invocation, NULL);
 
-        abrt_problems2_object_destroy(user_data, connection);
+        abrt_p2_object_destroy(user_data);
         return;
     }
 
@@ -245,18 +282,18 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
         return NULL;
     }
 
-    uid_t caller_uid = abrt_problems2_service_caller_real_uid(connection, caller, error);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(connection, caller, error);
     if (caller_uid == (uid_t)-1)
         return NULL;
 
-    struct p2s_node *node = abrt_problems2_object_get_node(user_data);
-    if (abrt_problems2_session_check_sanity(node, caller, caller_uid, error) != 0)
+    AbrtP2Session *node = abrt_p2_object_get_node(user_data);
+    if (abrt_p2_session_check_sanity(node, caller, caller_uid, error) != 0)
         return NULL;
 
-    return g_variant_new_boolean(abrt_problems2_session_is_authorized(node));
+    return g_variant_new_boolean(abrt_p2_session_is_authorized(node));
 }
 
-GDBusInterfaceVTable *abrt_problems2_session_node_vtable(void)
+GDBusInterfaceVTable *abrt_p2_session_vtable(void)
 {
     static GDBusInterfaceVTable default_vtable =
     {
@@ -270,77 +307,86 @@ GDBusInterfaceVTable *abrt_problems2_session_node_vtable(void)
 
 /* Public interface */
 
-struct p2s_node *abrt_problems2_session_node_new(char *caller, uid_t uid)
+AbrtP2Session *abrt_p2_session_new(char *caller, uid_t uid)
 {
-    struct p2s_node *node = xmalloc(sizeof(*node));
-    node->p2s_caller = caller;
-    node->p2s_uid = uid;
+    AbrtP2Session *node = g_object_new(TYPE_ABRT_P2_SESSION, NULL);
+    node->pv->p2s_caller = caller;
+    node->pv->p2s_uid = uid;
 
-    if (node->p2s_uid == 0)
-        node->p2s_state = P2S_STATE_AUTH;
+    if (node->pv->p2s_uid == 0)
+        node->pv->p2s_state = ABRT_P2_SESSION_STATE_AUTH;
     else
-        node->p2s_state = P2S_STATE_INIT;
+        node->pv->p2s_state = ABRT_P2_SESSION_STATE_INIT;
 
-    node->p2s_stamp = time(NULL);
+    node->pv->p2s_stamp = time(NULL);
 
     return node;
 }
 
-void abrt_problems2_session_node_free(struct p2s_node *node)
+gint32 abrt_p2_session_authorize(AbrtP2Session *session)
 {
-    if (NULL == node)
-        return;
+    switch(session->pv->p2s_state)
+    {
+        case ABRT_P2_SESSION_STATE_INIT:
+            authorization_request_initialize(session);
+            return 1;
 
-    free(node->p2s_caller);
-    node->p2s_caller = (void *)0xDEADBEEF;
+        case ABRT_P2_SESSION_STATE_PENDING:
+            return 2;
+
+        case ABRT_P2_SESSION_STATE_AUTH:
+            return 0;
+
+        default:
+            error_msg("BUG: %s: forgotten state -> %d", __func__, session->pv->p2s_state);
+            return -1;
+    }
+
 }
 
-void abrt_problems2_session_object_close(struct abrt_problems2_object *obj, GDBusConnection *connection)
+void abrt_p2_session_close(AbrtP2Session *session)
 {
-    struct p2s_node *node = abrt_problems2_object_get_node(obj);
-    switch(node->p2s_state)
+    switch(session->pv->p2s_state)
     {
-        case P2S_STATE_AUTH:
-            change_state(obj, P2S_STATE_INIT, connection);
+        case ABRT_P2_SESSION_STATE_AUTH:
+            change_state(session, ABRT_P2_SESSION_STATE_INIT);
             break;
 
-        case P2S_STATE_PENDING:
+        case ABRT_P2_SESSION_STATE_PENDING:
             {
-                g_cancellable_cancel(node->p2s_auth_rq->cancellable);
-
-                authorization_request_destroy(obj);
-
-                change_state(obj, P2S_STATE_INIT, connection);
+                g_cancellable_cancel(session->pv->p2s_auth_rq->cancellable);
+                authorization_request_destroy(session);
+                change_state(session, ABRT_P2_SESSION_STATE_INIT);
             }
             break;
 
-        case P2S_STATE_INIT:
+        case ABRT_P2_SESSION_STATE_INIT:
             /* pass */
             break;
     }
 }
 
-uid_t abrt_problems2_session_uid(struct p2s_node *session)
+uid_t abrt_p2_session_uid(AbrtP2Session *session)
 {
-    return session->p2s_uid;
+    return session->pv->p2s_uid;
 }
 
-const char *abrt_problems2_session_caller(struct p2s_node *session)
+const char *abrt_p2_session_caller(AbrtP2Session *session)
 {
-    return session->p2s_caller;
+    return session->pv->p2s_caller;
 }
 
-int abrt_problems2_session_is_authorized(struct p2s_node *session)
+int abrt_p2_session_is_authorized(AbrtP2Session *session)
 {
-    return session->p2s_state == P2S_STATE_AUTH;
+    return session->pv->p2s_state == ABRT_P2_SESSION_STATE_AUTH;
 }
 
-int abrt_problems2_session_check_sanity(struct p2s_node *session,
+int abrt_p2_session_check_sanity(AbrtP2Session *session,
             const char *caller,
             uid_t caller_uid,
             GError **error)
 {
-    if (strcmp(session->p2s_caller, caller) == 0 && session->p2s_uid == caller_uid)
+    if (strcmp(session->pv->p2s_caller, caller) == 0 && session->pv->p2s_uid == caller_uid)
         /* the session node is sane */
         return 0;
 

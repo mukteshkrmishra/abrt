@@ -13,7 +13,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
                        "type"        : "problems2testsuite_type",
                        "reason"      : "Application has been killed",
                        "backtrace"   : "die()",
-                       "executable"  : "/usr/bin/sh",
+                       "executable"  : "/usr/bin/true",
                        "duphash"     : None,
                        "uuid"        : None}
 

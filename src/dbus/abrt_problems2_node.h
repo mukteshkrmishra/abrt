@@ -18,8 +18,16 @@
 #ifndef ABRT_PROBLEMS2_NODE_H
 #define ABRT_PROBLEMS2_NODE_H
 
+G_BEGIN_DECLS
+
+#include <glib-object.h>
 #include <gio/gio.h>
 
-GDBusInterfaceVTable *abrt_problems2_node_vtable(void);
+#define TYPE_ABRT_P2 abrt_p2_get_type ()
+G_DECLARE_FINAL_TYPE(AbrtP2, abrt_p2, ABRT, P2, GObject)
+
+GDBusInterfaceVTable *abrt_p2_vtable(void);
+
+G_END_DECLS
 
 #endif/*ABRT_PROBLEMS2_NODE_H*/
