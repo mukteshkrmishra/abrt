@@ -137,21 +137,12 @@ problem_data_t *abrt_p2_entry_problem_data(AbrtP2Entry *node, uid_t caller_uid, 
     return pd;
 }
 
-static AbrtP2Entry *get_entry(GDBusConnection *connection,
-                          struct abrt_p2_object *object,
+static AbrtP2Entry *get_entry(struct abrt_p2_object *object,
                           uid_t caller_uid,
-                          const gchar *object_path,
                           struct dump_dir **dd,
                           GError **error)
 {
     AbrtP2Entry *node = abrt_p2_object_get_node(object);
-    if (node == NULL)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
-                    "Requested path does not exist");
-        return NULL;
-    }
-
     if (0 != abrt_p2_entry_accessible_by_uid(node, caller_uid, dd))
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
@@ -175,12 +166,6 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
     while (g_variant_iter_loop(&iter, "s", &name))
     {
         log_debug("Reading element: %s", name);
-        if (!str_is_correct_filename(name))
-        {
-            error_msg("Attempt to read prohibited data: '%s'", name);
-            continue;
-        }
-
         /* Do ask me why -> see libreport xmalloc_read() */
         size_t data_size = (INT_MAX - 4095);
 
@@ -192,6 +177,8 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
         {
             if (r == -ENOENT)
                 log_debug("Element does not exist: %s", name);
+            if (r == -EINVAL)
+                error_msg("Attempt to read prohibited data: '%s'", name);
             else
                 error_msg("Failed to open %s: %s", name, strerror(-r));
             continue;
@@ -299,7 +286,10 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
     while (g_variant_iter_loop(&iter, "{sv}", &name, &value))
     {
         log_debug("Saving element: %s", name);
-        if (!str_is_correct_filename(name))
+        struct stat item_stat;
+        memset(&item_stat, 0, sizeof(item_stat));
+        int r = dd_item_stat(dd, name, &item_stat);
+        if (r == -EINVAL)
         {
             error_msg("Attempt to save prohibited data: '%s'", name);
             g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
@@ -307,9 +297,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             retval = -EACCES;
             goto exit_loop_on_error;
         }
-
-        off_t item_size = 0;
-        if (!dd_exist(dd, name))
+        else if (r == -ENOENT)
         {
             if (elements_limit != 0 && dd_items >= elements_limit)
             {
@@ -321,24 +309,20 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
 
             ++dd_items;
         }
-        else
+        else if (r < 0)
         {
-            item_size = dd_get_item_size(dd, name);
-            if (item_size < 0)
+            error_msg("Failed to get size of element '%s'", name);
+            if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
             {
-                error_msg("Failed to get size of element '%s'", name);
-                if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
-                {
-                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                            "Failed to get size of underlying data");
-                    retval = item_size;
-                    goto exit_loop_on_error;
-                }
-                continue;
+                g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                        "Failed to get size of underlying data");
+                retval = r;
+                goto exit_loop_on_error;
             }
+            continue;
         }
 
-        const off_t base_size = dd_size - item_size;
+        const off_t base_size = dd_size - item_stat.st_size;
 
         if (   g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)
             || g_variant_is_of_type(value, G_VARIANT_TYPE_BYTESTRING))
@@ -383,7 +367,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             /* Do not allow dump dir growing in case it already consumes
              * more than the limit */
             if (   dd_size_limit != 0
-                && data_size > item_size
+                && data_size > item_stat.st_size
                 && base_size + data_size > dd_size_limit)
             {
                 error_msg("Cannot save text element: problem data size limit %ld", dd_size_limit);
@@ -426,7 +410,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             }
 
             /* Do not allow dump dir growing */
-            const off_t max_size = base_size > dd_size_limit ? item_size : dd_size_limit - base_size;
+            const off_t max_size = base_size > dd_size_limit ? item_stat.st_size : dd_size_limit - base_size;
             const off_t r = dd_copy_fd(dd, name, fd, /*copy_flags*/0, max_size);
             close(fd);
 
@@ -494,13 +478,9 @@ static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
     while (g_variant_iter_loop(&iter, "s", &name))
     {
         log_debug("Deleting element: %s", name);
-        if (!str_is_correct_filename(name))
-        {
+        const int r = dd_delete_item(dd, name);
+        if (r == -EINVAL)
             error_msg("Attempt to remove prohibited data: '%s'", name);
-            continue;
-        }
-
-        dd_delete_item(dd, name);
     }
 }
 
@@ -527,7 +507,7 @@ static void dbus_method_call(GDBusConnection *connection,
     }
 
     struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(connection, user_data, caller_uid, object_path, &dd, &error);
+    AbrtP2Entry *node = get_entry(user_data, caller_uid, &dd, &error);
     if (node == NULL)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -678,7 +658,7 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 
     GVariant *retval;
     struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(connection, user_data, caller_uid, object_path, &dd, error);
+    AbrtP2Entry *node = get_entry(user_data, caller_uid, &dd, error);
     if (node == NULL)
         return NULL;
 
@@ -837,7 +817,7 @@ static gboolean dbus_set_property(GDBusConnection *connection,
         return FALSE;
 
     struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(connection, user_data, caller, object_path, &dd, error);
+    AbrtP2Entry *node = get_entry(user_data, caller, &dd, error);
     if (node == NULL)
         return FALSE;
 

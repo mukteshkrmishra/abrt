@@ -179,6 +179,9 @@ static GVariant *handle_NewProblem(GDBusConnection *connection,
 
     free(problem_id);
 
+    if (new_path == NULL)
+        return NULL;
+
     return g_variant_new("(o)", new_path);
 }
 

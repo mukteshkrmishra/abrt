@@ -162,7 +162,7 @@ class TestCase(unittest.TestCase):
             print("Run this test under root!")
             sys.exit(1)
 
-        if len(sys.argv) != 2:
+        if len(sys.argv) < 2:
             print("Pass an uid of non-root user as the first argument!")
             sys.exit(1)
 
@@ -242,7 +242,14 @@ class TestCase(unittest.TestCase):
 
 
 def main(test_case_class):
-    suite = unittest.TestLoader().loadTestsFromTestCase(test_case_class)
+    suite = None
+    if len(sys.argv) < 3:
+        suite = unittest.TestLoader().loadTestsFromTestCase(test_case_class)
+    else:
+        suite = unittest.TestSuite()
+        for test_case_name in sys.argv[2:]:
+            suite.addTest(test_case_class(test_case_name))
+
     results = unittest.TextTestRunner().run(suite)
     sys.exit(int(not results.wasSuccessful()))
 
