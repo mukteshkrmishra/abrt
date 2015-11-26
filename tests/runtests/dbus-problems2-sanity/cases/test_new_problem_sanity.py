@@ -7,6 +7,7 @@ import abrt_p2_testing
 from abrt_p2_testing import (wait_for_hooks,
                              get_huge_file_path,
                              create_fully_initialized_problem,
+                             open_fd,
                              Problems2Entry,
                              DBUS_LIMIT_ELEMENTS_COUNT,)
 
@@ -114,6 +115,22 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
 
             self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Problem data is too big",
                                   self.p2.NewProblem, description, 0)
+
+    def test_non_readable_filedescriptor(self):
+        with open_fd("/etc/passwd", os.O_PATH) as fd:
+            description = {"analyzer"    : "problems2testsuite_analyzer",
+                           "reason"      : "Application has been killed",
+                           "backtrace"   : "die()",
+                           "duphash"     : "FAKE_BINARY_TYPE",
+                           "uuid"        : "FAKE_BINARY_TYPE",
+                           "passwd"      : dbus.types.UnixFd(fd),
+                           "executable"  : "/usr/bin/foo",
+                           "type"        : "abrt-problems2-sanity"}
+
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to save data of passed file descriptor",
+                   self.p2.NewProblem, description, 0)
+
+
 
 
 if __name__ == "__main__":

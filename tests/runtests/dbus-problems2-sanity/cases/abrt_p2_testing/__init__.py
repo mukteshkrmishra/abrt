@@ -336,3 +336,9 @@ def authorize_session(test, bus=None, session_path=None):
     p2_session = get_authorized_session(test, bus, session_path)
     yield p2_session
     p2_session.Close()
+
+@contextmanager
+def open_fd(filename, flags):
+    fd = os.open(filename, flags)
+    yield fd
+    os.close(fd)

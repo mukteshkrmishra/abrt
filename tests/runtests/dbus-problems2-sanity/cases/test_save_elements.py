@@ -8,6 +8,7 @@ import abrt_p2_testing
 from abrt_p2_testing import (wait_for_hooks,
                              create_fully_initialized_problem,
                              get_huge_file_path,
+                             open_fd,
                              Problems2Entry,
                              DBUS_LIMIT_ELEMENTS_COUNT,
                              DBUS_LIMIT_DATA_SIZE_KB
@@ -137,6 +138,14 @@ class TestSaveElements(abrt_p2_testing.TestCase):
         data = entry.ReadElements([key], 0x4)
         self.assertIn(key, data, "SaveElements: created non-text file")
         self.assertEqual(smaller_ed[key], data[key], "SaveElements: dump directory does not grow")
+
+    def test_non_readable_filedescriptor(self):
+        entry = Problems2Entry(self.bus, self.p2_entry_path)
+
+        with open_fd("/etc/passwd", os.O_PATH) as fd:
+            entry.SaveElements({"passwd": dbus.types.UnixFd(fd)}, 0)
+            data = entry.ReadElements(["passwd"], 0x0)
+            self.assertNotIn("passwd", data)
 
 
 if __name__ == "__main__":
