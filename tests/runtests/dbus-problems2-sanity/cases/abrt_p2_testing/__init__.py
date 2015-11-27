@@ -70,7 +70,7 @@ class PolkitAuthenticationAgent(dbus.service.Object):
     def set_replies(self, replies):
         self._replies = replies
 
-    def _get_authorization_reply(self):
+    def _get_authorization_reply(self, message):
         if len(self._replies) == 0:
             logging.warning("Polkit AuthenticationAgent: no reply registered")
             return False
@@ -80,7 +80,7 @@ class PolkitAuthenticationAgent(dbus.service.Object):
             return cb
 
         try:
-            return cb()
+            return cb(message)
         except dbus.exceptions.DBusException as ex:
             logging.debug("Polkit AuthenticationAgent: callback raised an DBusException: %s" % (str(ex)))
             raise ex
@@ -95,7 +95,7 @@ class PolkitAuthenticationAgent(dbus.service.Object):
         # all Exceptions in this function are silently ignore
         logging.debug("Polkit AuthenticationAgent: BeginAuthentication : %s" % (cookie))
 
-        if not self._get_authorization_reply():
+        if not self._get_authorization_reply(message):
             logging.debug("Dismissed the authorization request")
             raise dbus.exceptions.DBusException("org.freedesktop.PolicyKit1.Error.Cancelled")
 

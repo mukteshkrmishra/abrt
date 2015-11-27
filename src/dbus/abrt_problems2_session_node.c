@@ -90,8 +90,7 @@ static void abrt_p2_session_init(AbrtP2Session *self)
     self->pv = abrt_p2_session_get_instance_private(self);
 }
 
-static void
-emit_authorization_changed(AbrtP2Session *session, gint32 status)
+static void emit_authorization_changed(AbrtP2Session *session, gint32 status)
 {
     g_signal_emit(session, s_signals[SN_AUTHORIZATION_CHANGED], 0, status);
 }
@@ -170,7 +169,7 @@ void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer u
     authorization_request_destroy(params->session);
 }
 
-void authorization_request_initialize(AbrtP2Session *session)
+void authorization_request_initialize(AbrtP2Session *session, GVariant *parameters)
 {
     struct check_auth_cb_params *auth_rq = xmalloc(sizeof(*auth_rq));
     auth_rq->session = session;
@@ -178,15 +177,29 @@ void authorization_request_initialize(AbrtP2Session *session)
     session->pv->p2s_auth_rq = auth_rq;
     change_state(session, ABRT_P2_SESSION_STATE_PENDING);
 
+    /* http://www.freedesktop.org/software/polkit/docs/latest/polkit-apps.html
+     */
     PolkitSubject *subject = polkit_system_bus_name_new(session->pv->p2s_caller);
+    PolkitDetails *details = NULL;
+    if (parameters != NULL)
+    {
+        GVariant *message = g_variant_lookup_value(parameters, "message", G_VARIANT_TYPE_STRING);
+        if (message != NULL)
+        {
+            details = polkit_details_new();
+            polkit_details_insert(details, "polkit.message", g_variant_get_string(message, NULL));
+        }
+    }
+
     polkit_authority_check_authorization(abrt_p2_polkit_authority(),
                 subject,
                 "org.freedesktop.problems.getall",
-                /* TODO: polkit.message */ NULL,
+                details,
                 POLKIT_CHECK_AUTHORIZATION_FLAGS_ALLOW_USER_INTERACTION,
                 auth_rq->cancellable,
                 check_authorization_callback,
                 auth_rq);
+
 }
 
 /* D-Bus method handler
@@ -230,7 +243,9 @@ static void dbus_method_call(GDBusConnection *connection,
 
     if (strcmp("Authorize", method_name) == 0)
     {
-        const gint32 retval = abrt_p2_session_authorize(session);
+        GVariant *details = g_variant_get_child_value(parameters, 0);
+        const gint32 retval = abrt_p2_session_authorize(session, details);
+        g_variant_unref(details);
 
         if (retval < 0)
         {
@@ -323,12 +338,12 @@ AbrtP2Session *abrt_p2_session_new(char *caller, uid_t uid)
     return node;
 }
 
-gint32 abrt_p2_session_authorize(AbrtP2Session *session)
+gint32 abrt_p2_session_authorize(AbrtP2Session *session, GVariant *parameters)
 {
     switch(session->pv->p2s_state)
     {
         case ABRT_P2_SESSION_STATE_INIT:
-            authorization_request_initialize(session);
+            authorization_request_initialize(session, parameters);
             return 1;
 
         case ABRT_P2_SESSION_STATE_PENDING:

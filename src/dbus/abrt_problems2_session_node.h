@@ -34,7 +34,7 @@ const char *abrt_p2_session_caller(AbrtP2Session *session);
 int abrt_p2_session_is_authorized(AbrtP2Session *session);
 
 
-gint32 abrt_p2_session_authorize(AbrtP2Session *session);
+gint32 abrt_p2_session_authorize(AbrtP2Session *session, GVariant *parameters);
 void abrt_p2_session_close(AbrtP2Session *session);
 int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid_t caller_uid, GError **error);
 

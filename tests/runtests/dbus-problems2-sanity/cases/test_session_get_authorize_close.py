@@ -21,19 +21,23 @@ class TestSession(abrt_p2_testing.TestCase):
         p2_session.getobject().connect_to_signal("AuthorizationChanged", self.handle_authorization_changed)
 
         with start_polkit_agent(self.root_bus, self.bus.get_unique_name()) as pk_agent:
-            def check_pending_authorization(retval):
+            def check_pending_authorization(retval, exp_message, message):
                 self.logger.debug("Calling Authorize(): expecting pending")
+
+                if not exp_message is None:
+                    self.assertEquals(message, exp_message)
+
                 ret = p2_session.Authorize(dict())
                 self.assertEqual(2, ret, "Not-yet finished authorization request")
                 self.interrupt_waiting()
                 return retval
 
-            pk_agent.set_replies([partial(check_pending_authorization, False),
-                                  partial(check_pending_authorization, True)])
+            pk_agent.set_replies([partial(check_pending_authorization, False, "Foo the bars"),
+                                  partial(check_pending_authorization, True, None)])
 
             self.logger.debug("Calling Authorize(): expecting failure")
 
-            ret = p2_session.Authorize(dict())
+            ret = p2_session.Authorize({"message" : "Foo the bars"})
             self.assertEqual(1, ret, "Pending authorization request")
 
             self.loop_counter += 1
