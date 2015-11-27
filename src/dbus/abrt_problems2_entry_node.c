@@ -250,8 +250,8 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
 }
 
 int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
-                                GVariant *elements, GUnixFDList *fd_list,
-                                uid_t caller_uid, GError **error)
+        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+        AbrtP2EntrySaveElementsLimits *limits, GError **error)
 {
     int retval = 0;
 
@@ -259,10 +259,6 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
     GVariant *value = NULL;
     GVariantIter iter;
     g_variant_iter_init(&iter, elements);
-
-    /* Implement global size constraints */
-    const int elements_limit = abrt_p2_service_elements_limit(caller_uid);
-    const off_t dd_size_limit = abrt_p2_service_dd_size_limit(caller_uid);
 
     off_t dd_size = dd_compute_size(dd, /*no flags*/0);
     if (dd_size < 0)
@@ -299,9 +295,9 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
         }
         else if (r == -ENOENT)
         {
-            if (elements_limit != 0 && dd_items >= elements_limit)
+            if (limits->elements_count != 0 && dd_items >= limits->elements_count)
             {
-                error_msg("Cannot create new element '%s': reached the limit for elements %u", name, elements_limit);
+                error_msg("Cannot create new element '%s': reached the limit for elements %u", name, limits->elements_count);
                 if (flags & ABRT_P2_ENTRY_ELEMENTS_COUNT_LIMIT_FATAL)
                     goto exit_loop_on_too_many_elements;
                 continue;
@@ -322,7 +318,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             continue;
         }
 
-        const off_t base_size = dd_size - item_stat.st_size;
+        const off_t base_size = limits->data_size - item_stat.st_size;
 
         if (   g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)
             || g_variant_is_of_type(value, G_VARIANT_TYPE_BYTESTRING))
@@ -366,11 +362,11 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
 
             /* Do not allow dump dir growing in case it already consumes
              * more than the limit */
-            if (   dd_size_limit != 0
+            if (   limits->data_size != 0
                 && data_size > item_stat.st_size
-                && base_size + data_size > dd_size_limit)
+                && base_size + data_size > limits->data_size)
             {
-                error_msg("Cannot save text element: problem data size limit %ld", dd_size_limit);
+                error_msg("Cannot save text element: problem data size limit %ld", limits->data_size);
                 if (flags & ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL)
                     goto exit_loop_on_too_big_data;
                 continue;
@@ -410,7 +406,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             }
 
             /* Do not allow dump dir growing */
-            const off_t max_size = base_size > dd_size_limit ? item_stat.st_size : dd_size_limit - base_size;
+            const off_t max_size = base_size > limits->data_size ? item_stat.st_size : limits->data_size - base_size;
             const off_t r = dd_copy_fd(dd, name, fd, /*copy_flags*/0, max_size);
             close(fd);
 
@@ -497,8 +493,10 @@ static void dbus_method_call(GDBusConnection *connection,
 {
     log_debug("Problems2.Entry method : %s", method_name);
 
+    AbrtP2Service *service = abrt_p2_object_service(user_data);
+
     GError *error = NULL;
-    uid_t caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
+    uid_t caller_uid = abrt_p2_service_caller_uid(service, caller, &error);
     if (caller_uid == (uid_t)-1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -579,7 +577,12 @@ static void dbus_method_call(GDBusConnection *connection,
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
         GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        int r = abrt_p2_entry_save_elements(dd, flags, elements, fd_list, caller_uid, &error);
+        AbrtP2EntrySaveElementsLimits limits;
+        limits.elements_count = abrt_p2_service_elements_limit(service, caller_uid);
+        limits.data_size = abrt_p2_service_data_size_limit(service, caller_uid);
+
+        int r = abrt_p2_entry_save_elements(dd, flags, elements, fd_list,
+                                            caller_uid, &limits, &error);
         if (r != 0)
         {
             g_dbus_method_invocation_return_gerror(invocation, error);
@@ -652,7 +655,8 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
 {
     log_debug("Problems2.Entry get property : %s", property_name);
 
-    uid_t caller_uid = abrt_p2_service_caller_uid(connection, caller, error);
+    AbrtP2Service *service = abrt_p2_object_service(user_data);
+    uid_t caller_uid = abrt_p2_service_caller_uid(service, caller, error);
     if (caller_uid == (uid_t)-1)
         return NULL;
 

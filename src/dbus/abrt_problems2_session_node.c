@@ -225,7 +225,8 @@ static void dbus_method_call(GDBusConnection *connection,
     //GVariant *response;
     GError *error = NULL;
 
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(caller, &error);
+    AbrtP2Service *service = abrt_p2_object_service(user_data);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(service, caller, &error);
     if (caller_uid == (uid_t)-1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -297,7 +298,8 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
         return NULL;
     }
 
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(caller, error);
+    AbrtP2Service *service = abrt_p2_object_service(user_data);
+    uid_t caller_uid = abrt_p2_service_caller_real_uid(service, caller, error);
     if (caller_uid == (uid_t)-1)
         return NULL;
 

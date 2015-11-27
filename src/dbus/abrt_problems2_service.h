@@ -27,9 +27,63 @@
 #define ABRT_P2_NS_MEMBER(name) ABRT_P2_NS"."name
 
 /*
+ * Service administration
+ */
+
+#define TYPE_ABRT_P2_SERVICE abrt_p2_service_get_type ()
+G_DECLARE_FINAL_TYPE(AbrtP2Service, abrt_p2_service, ABRT_P2, SERVICE, GObject)
+
+AbrtP2Service *abrt_p2_service_new(GError **error);
+
+int abrt_p2_service_register_objects(AbrtP2Service *service,
+            GDBusConnection *connection, GError **error);
+
+const char *abrt_p2_service_session_path(AbrtP2Service *service,
+            const char *caller, GError **error);
+
+uid_t abrt_p2_service_caller_uid(AbrtP2Service *service,
+            const char *caller, GError **error);
+
+uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service,
+            const char *caller, GError **error);
+
+const char *abrt_p2_service_save_problem(
+            AbrtP2Service *service,
+            const char *type_str,
+            GVariant *problem_info, GUnixFDList *fd_list,
+            uid_t caller_uid, char **problem_id, GError **error);
+
+int abrt_p2_service_remove_problem(AbrtP2Service *service,
+            const char *entry_path, uid_t caller_uid, GError **error);
+
+problem_data_t *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
+            const char *entry_path, uid_t caller_uid, GError **error);
+
+GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
+
+int abrt_p2_service_user_can_create_new_problem(AbrtP2Service *service, uid_t uid);
+
+/*
+ * Configuration and limits
+ */
+unsigned abrt_p2_service_user_clients_limit(AbrtP2Service *service, uid_t uid);
+
+unsigned abrt_p2_service_elements_limit(AbrtP2Service *service, uid_t uid);
+
+off_t abrt_p2_service_data_size_limit(AbrtP2Service *service, uid_t uid);
+
+unsigned abrt_p2_service_user_problems_limit(AbrtP2Service *service, uid_t uid);
+
+unsigned abrt_p2_service_new_problem_throtling_magnitude(AbrtP2Service *service, uid_t uid);
+
+unsigned abrt_p2_service_new_problems_batch(AbrtP2Service *service, uid_t uid);
+
+/*
  * D-Bus object representation
  */
 struct abrt_p2_object;
+
+AbrtP2Service *abrt_p2_object_service(struct abrt_p2_object *object);
 
 void *abrt_p2_object_get_node(struct abrt_p2_object *object);
 
@@ -37,45 +91,6 @@ void abrt_p2_object_destroy(struct abrt_p2_object *object);
 
 void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
             const char *member, GVariant *parameters);
-
-/*
- * Service administration
- */
-int abrt_p2_service_init(void);
-
-void abrt_p2_service_uninit(void);
-
-void abrt_p2_service_register_objects(GDBusConnection *connection);
-
-/*
- * Shared functionality
- */
-const char *abrt_p2_service_session_path(GDBusConnection *connection,
-            const char *caller, GError **error);
-
-uid_t abrt_p2_service_caller_uid(GDBusConnection *connection,
-            const char *caller, GError **error);
-
-uid_t abrt_p2_service_caller_real_uid(const char *caller, GError **error);
-
-const char *abrt_p2_service_save_problem(GDBusConnection *connection,
-            const char *type_str, GVariant *problem_info, GUnixFDList *fd_list,
-            uid_t caller_uid, char **problem_id, GError **error);
-
-int abrt_p2_service_remove_problem(const char *entry_path, uid_t caller_uid, GError **error);
-
-problem_data_t *abrt_p2_service_entry_problem_data(const char *entry_path,
-        uid_t caller_uid, GError **error);
-
-GList *abrt_p2_service_get_problems_nodes(uid_t uid);
-
-unsigned abrt_p2_service_user_clients_limit(uid_t uid);
-
-unsigned abrt_p2_service_elements_limit(uid_t uid);
-
-off_t abrt_p2_service_dd_size_limit(uid_t uid);
-
-int abrt_p2_service_allowed_new_problem(uid_t uid);
 
 /*
  * Utilities

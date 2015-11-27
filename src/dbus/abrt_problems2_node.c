@@ -43,14 +43,14 @@ static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
     return retval;
 }
 
-static GVariant *handle_NewProblem(GDBusConnection *connection,
+static GVariant *handle_NewProblem(AbrtP2Service *service,
                                    GVariant *problem_info,
                                    gint32 flags,
                                    uid_t caller_uid,
                                    GUnixFDList *fd_list,
                                    GError **error)
 {
-    int r = abrt_p2_service_allowed_new_problem(caller_uid);
+    int r = abrt_p2_service_user_can_create_new_problem(service, caller_uid);
     if (r == 0)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
@@ -168,7 +168,7 @@ static GVariant *handle_NewProblem(GDBusConnection *connection,
 
     GVariant *real_problem_info = g_variant_dict_end(&pd);
 
-    new_path = abrt_p2_service_save_problem(connection, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
+    new_path = abrt_p2_service_save_problem(service, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
 
     g_variant_unref(real_problem_info);
     free(type_str);
@@ -185,9 +185,9 @@ static GVariant *handle_NewProblem(GDBusConnection *connection,
     return g_variant_new("(o)", new_path);
 }
 
-GVariant *handle_GetSession(GDBusConnection *connection, const char *caller, GError **error)
+GVariant *handle_GetSession(AbrtP2Service *service, const char *caller, GError **error)
 {
-    const char *session_path = abrt_p2_service_session_path(connection, caller, error);
+    const char *session_path = abrt_p2_service_session_path(service, caller, error);
 
     if (session_path == NULL)
         return NULL;
@@ -195,12 +195,12 @@ GVariant *handle_GetSession(GDBusConnection *connection, const char *caller, GEr
     return g_variant_new("(o)", session_path);
 }
 
-GVariant *handle_GetProblems(uid_t caller_uid)
+GVariant *handle_GetProblems(AbrtP2Service *service, uid_t caller_uid)
 {
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("ao"));
 
-    GList *problem_nodes = abrt_p2_service_get_problems_nodes(caller_uid);
+    GList *problem_nodes = abrt_p2_service_get_problems_nodes(service, caller_uid);
     for (GList *p = problem_nodes; p != NULL; p = g_list_next(p))
         g_variant_builder_add(&builder, "o", (char*)p->data);
     g_list_free(problem_nodes);
@@ -208,9 +208,9 @@ GVariant *handle_GetProblems(uid_t caller_uid)
     return g_variant_new("(ao)", &builder);
 }
 
-GVariant *handle_GetProblemData(const char *entry_path, uid_t caller_uid, GError **error)
+GVariant *handle_GetProblemData(AbrtP2Service *service, const char *entry_path, uid_t caller_uid, GError **error)
 {
-    problem_data_t *pd = abrt_p2_service_entry_problem_data(entry_path, caller_uid, error);
+    problem_data_t *pd = abrt_p2_service_entry_problem_data(service, entry_path, caller_uid, error);
     if (NULL == pd)
         return NULL;
 
@@ -242,14 +242,15 @@ GVariant *handle_GetProblemData(const char *entry_path, uid_t caller_uid, GError
     return g_variant_new("(a{s(its)})", &response_builder);
 }
 
-static GVariant *handle_DeleteProblems(GVariant *entries, uid_t caller_uid, GError **error)
+static GVariant *handle_DeleteProblems(AbrtP2Service *service,
+            GVariant *entries, uid_t caller_uid, GError **error)
 {
     GVariantIter *iter;
     gchar *entry_node;
     g_variant_get(entries, "ao", &iter);
     while (g_variant_iter_loop(iter, "o", &entry_node))
     {
-        if (abrt_p2_service_remove_problem(entry_node, caller_uid, error) != 0)
+        if (abrt_p2_service_remove_problem(service, entry_node, caller_uid, error) != 0)
         {
             g_free(entry_node);
             return NULL;
@@ -283,7 +284,8 @@ static void dbus_method_call(GDBusConnection *connection,
     GVariant *response;
 
     GError *error = NULL;
-    caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
+    AbrtP2Service *service = abrt_p2_object_service(user_data);
+    caller_uid = abrt_p2_service_caller_uid(service, caller, &error);
     if (caller_uid == (uid_t) -1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -298,33 +300,29 @@ static void dbus_method_call(GDBusConnection *connection,
         GVariant *data = g_variant_get_child_value(parameters, 0);
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
-        response = handle_NewProblem(connection,
-                                data,
-                                flags,
-                                caller_uid,
-                                fd_list,
-                                &error);
+
+        response = handle_NewProblem(service, data, flags, caller_uid, fd_list, &error);
         g_variant_unref(data);
     }
     else if (strcmp("GetSession", method_name) == 0)
     {
-        response = handle_GetSession(connection, caller, &error);
+        response = handle_GetSession(service, caller, &error);
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
-        response = handle_GetProblems(caller_uid);
+        response = handle_GetProblems(service, caller_uid);
     }
     else if (strcmp("GetProblemData", method_name) == 0)
     {
         /* Parameter tuple is (0) */
         const char *entry_path;
         g_variant_get(parameters, "(&o)", &entry_path);
-        response = handle_GetProblemData(entry_path, caller_uid, &error);
+        response = handle_GetProblemData(service, entry_path, caller_uid, &error);
     }
     else if (strcmp("DeleteProblems", method_name) == 0)
     {
         GVariant *array = g_variant_get_child_value(parameters, 0);
-        response = handle_DeleteProblems(array, caller_uid, &error);
+        response = handle_DeleteProblems(service, array, caller_uid, &error);
         g_variant_unref(array);
     }
     else

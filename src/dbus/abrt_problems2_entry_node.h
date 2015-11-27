@@ -53,8 +53,15 @@ enum AbrP2EntrySaveElementsFlags
                     | ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL),
 };
 
+typedef struct
+{
+    unsigned elements_count;
+    off_t    data_size;
+} AbrtP2EntrySaveElementsLimits;
+
 int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
-        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid, GError **error);
+        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+        AbrtP2EntrySaveElementsLimits *limits, GError **error);
 
 enum AbrtP2EntryReadElementsFlags
 {

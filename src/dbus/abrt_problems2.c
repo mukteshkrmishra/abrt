@@ -27,7 +27,16 @@ static void on_bus_acquired(GDBusConnection *connection,
                             const gchar     *name,
                             gpointer         user_data)
 {
-    abrt_p2_service_register_objects(connection);
+    GError *error = NULL;
+
+    int r = abrt_p2_service_register_objects(ABRT_P2_SERVICE(user_data), connection, &error);
+    if (r == -EALREADY)
+        return;
+
+    error_msg("Failed to register Problems2 Objects: %s", error->message);
+    g_error_free(error);
+
+    g_main_loop_quit(g_loop);
 }
 
 static void on_name_acquired(GDBusConnection *connection,
@@ -43,7 +52,8 @@ static void on_name_lost(GDBusConnection *connection,
 {
     log_warning("The name '%s' has been lost, please check if other "
               "service owning the name is not running.\n", name);
-    exit(1);
+
+    g_main_loop_quit(g_loop);
 }
 
 void quit_loop(int signo)
@@ -86,10 +96,12 @@ int main(int argc, char *argv[])
     if (getuid() != 0)
         error_msg_and_die("This program must be run as root.");
 
-    int r = abrt_p2_service_init();
-    if (r != 0)
+    GError *error = NULL;
+    AbrtP2Service *service = abrt_p2_service_new(&error);
+    if (service == NULL)
     {
-        error_msg_and_die("Failed to initialize ABRT Problems2 service");
+        error_msg_and_die("Failed to initialize ABRT Problems2 service: %s",
+                error->message);
     }
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
@@ -98,8 +110,8 @@ int main(int argc, char *argv[])
                               on_bus_acquired,
                               on_name_acquired,
                               on_name_lost,
-                              NULL,
-                              (GDestroyNotify)NULL);
+                              service,
+                              g_object_unref);
 
 
     g_loop = g_main_loop_new(NULL, FALSE);
@@ -111,9 +123,8 @@ int main(int argc, char *argv[])
 
     log_notice("Cleaning up");
 
-    g_bus_unown_name(owner_id);
-
-    abrt_p2_service_uninit();
+    if (owner_id > 0)
+        g_bus_unown_name(owner_id);
 
     free_abrt_conf_data();
 

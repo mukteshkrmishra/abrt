@@ -350,7 +350,7 @@ static void handle_method_call(GDBusConnection *connection,
     GVariant *response;
 
     GError *error = NULL;
-    caller_uid = abrt_p2_service_caller_uid(connection, caller, &error);
+    caller_uid = abrt_p2_service_caller_uid(ABRT_P2_SERVICE(user_data), caller, &error);
     if (caller_uid == (uid_t) -1)
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
@@ -809,14 +809,24 @@ static void on_bus_acquired(GDBusConnection *connection,
                                                        ABRT_DBUS_OBJECT,
                                                        introspection_data->interfaces[0],
                                                        &interface_vtable,
-                                                       NULL,  /* user_data */
+                                                       user_data,
                                                        NULL,  /* user_data_free_func */
                                                        NULL); /* GError** */
     g_assert(registration_id > 0);
 
-    abrt_p2_service_register_objects(connection);
+    GError *error = NULL;
 
-    reset_timeout();
+    int r = abrt_p2_service_register_objects(ABRT_P2_SERVICE(user_data), connection, &error);
+    if (r == -EALREADY)
+    {
+        reset_timeout();
+        return;
+    }
+
+    error_msg("Failed to register Problems2 Objects: %s", error->message);
+    g_error_free(error);
+
+    g_main_loop_quit(loop);
 }
 
 /* not used
@@ -889,8 +899,8 @@ int main(int argc, char *argv[])
     if (err != NULL)
         error_msg_and_die("Invalid D-Bus interface: %s", err->message);
 
-    int r = abrt_p2_service_init();
-    if (r != 0)
+    AbrtP2Service *service = abrt_p2_service_new(&err);
+    if (service == NULL)
         error_msg_and_die("Failed to initialize Problems2 service: %s", err->message);
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
@@ -912,7 +922,7 @@ int main(int argc, char *argv[])
 
     g_bus_unown_name(owner_id);
 
-    abrt_p2_service_uninit();
+    g_object_unref(service);
     g_dbus_node_info_unref(introspection_data);
 
     free_abrt_conf_data();
