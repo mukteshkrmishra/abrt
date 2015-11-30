@@ -61,7 +61,21 @@ GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
 
 GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
 
-int abrt_p2_service_user_can_create_new_problem(AbrtP2Service *service, uid_t uid);
+int abrt_p2_service_user_can_create_new_problem(AbrtP2Service *service,
+            uid_t uid);
+
+GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
+            GVariant *problem_info, gint32 flags, uid_t caller_uid,
+            GUnixFDList *fd_list, GError **error);
+
+GVariant *abrt_p2_service_callers_session(AbrtP2Service *service,
+            const char *caller, GError **error);
+
+GVariant *abrt_p2_service_get_problems(AbrtP2Service *service, uid_t caller_uid,
+            gint32 flags, GError **error);
+
+GVariant *abrt_p2_service_delete_problems(AbrtP2Service *service,
+            GVariant *entries, uid_t caller_uid, GError **error);
 
 /*
  * Configuration and limits
@@ -78,6 +92,7 @@ unsigned abrt_p2_service_new_problem_throtling_magnitude(AbrtP2Service *service,
 
 unsigned abrt_p2_service_new_problems_batch(AbrtP2Service *service, uid_t uid);
 
+#if 0
 /*
  * D-Bus object representation
  */
@@ -91,5 +106,6 @@ void abrt_p2_object_destroy(struct abrt_p2_object *object);
 
 void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
             const char *member, GVariant *parameters);
+#endif
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

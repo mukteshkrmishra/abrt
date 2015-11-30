@@ -96,14 +96,8 @@ GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
             AbrtP2EntrySaveElementsLimits *limits, GError **error);
 
 /*
- * D-Bus Bindings
- */
-GDBusInterfaceVTable *abrt_p2_entry_vtable(void);
-
-/*
  * Utility functions
  */
-
 int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
         GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
         AbrtP2EntrySaveElementsLimits *limits, GError **error);

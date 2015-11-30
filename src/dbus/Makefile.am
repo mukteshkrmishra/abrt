@@ -32,8 +32,6 @@ abrt_dbus_LDADD = \
 libabrt_problems2_service_a_SOURCES = \
     abrt_problems2_service.c \
     abrt_problems2_service.h \
-    abrt_problems2_node.c \
-    abrt_problems2_node.h \
     abrt_problems2_session_node.c \
     abrt_problems2_session_node.h \
     abrt_problems2_entry_node.c \

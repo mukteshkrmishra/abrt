@@ -181,7 +181,7 @@ static void authorization_request_destroy(AbrtP2Session *session)
     session->pv->p2s_auth_rq = NULL;
 }
 
-void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer user_data)
+static void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer user_data)
 {
     GError *error = NULL;
     PolkitAuthorizationResult *result = NULL;
@@ -207,7 +207,7 @@ void check_authorization_callback(GObject *source, GAsyncResult *res, gpointer u
     authorization_request_destroy(params->session);
 }
 
-void authorization_request_initialize(AbrtP2Session *session, GVariant *parameters)
+static void authorization_request_initialize(AbrtP2Session *session, GVariant *parameters)
 {
     struct check_auth_cb_params *auth_rq = xmalloc(sizeof(*auth_rq));
     auth_rq->session = session;
@@ -239,128 +239,6 @@ void authorization_request_initialize(AbrtP2Session *session, GVariant *paramete
                 auth_rq);
 
 }
-
-/* D-Bus method handler
- */
-static void dbus_method_call(GDBusConnection *connection,
-                        const gchar *caller,
-                        const gchar *object_path,
-                        const gchar *interface_name,
-                        const gchar *method_name,
-                        GVariant    *parameters,
-                        GDBusMethodInvocation *invocation,
-                        gpointer    user_data)
-{
-    log_debug("Problems2.Sessions method : %s", method_name);
-
-    /* Check sanity */
-    if (strcmp(interface_name, ABRT_P2_NS_MEMBER("Session")) != 0)
-    {
-        error_msg("Unsupported interface %s", interface_name);
-        return;
-    }
-
-    //GVariant *response;
-    GError *error = NULL;
-
-    AbrtP2Service *service = abrt_p2_object_service(user_data);
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(service, caller, &error);
-    if (caller_uid == (uid_t)-1)
-    {
-        g_dbus_method_invocation_return_gerror(invocation, error);
-        g_error_free(error);
-        return;
-    }
-
-    AbrtP2Session *session = abrt_p2_object_get_node(user_data);
-    if (abrt_p2_session_check_sanity(session, caller, caller_uid, &error) != 0)
-    {
-        g_dbus_method_invocation_return_gerror(invocation, error);
-        g_error_free(error);
-        return;
-    }
-
-    if (strcmp("Authorize", method_name) == 0)
-    {
-        GVariant *details = g_variant_get_child_value(parameters, 0);
-        const gint32 retval = abrt_p2_session_authorize(session, details);
-        g_variant_unref(details);
-
-        if (retval < 0)
-        {
-            g_dbus_method_invocation_return_error(invocation,
-                            G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                            "Failed authorize Session");
-        }
-        else
-        {
-            GVariant *response = g_variant_new("(i)", retval);
-            g_dbus_method_invocation_return_value(invocation, response);
-        }
-
-        return;
-    }
-
-    if (strcmp("Close", method_name) == 0)
-    {
-        abrt_p2_session_close(session);
-
-        g_dbus_method_invocation_return_value(invocation, NULL);
-
-        abrt_p2_object_destroy(user_data);
-        return;
-    }
-
-    error_msg("BUG: org.freedesktop.Problems2.Session does not have method: %s", method_name);
-}
-
-static GVariant *dbus_get_property(GDBusConnection *connection,
-                        const gchar *caller,
-                        const gchar *object_path,
-                        const gchar *interface_name,
-                        const gchar *property_name,
-                        GError      **error,
-                        gpointer    user_data)
-{
-    log_debug("Problems2.Sessions get property : %s", property_name);
-
-    if (strcmp(interface_name, "org.freedesktop.Problems2.Session") != 0)
-    {
-        error_msg("Unsupported interface %s", interface_name);
-        return NULL;
-    }
-
-    if (strcmp("is_authorized", property_name))
-    {
-        error_msg("Unsupported property %s", property_name);
-        return NULL;
-    }
-
-    AbrtP2Service *service = abrt_p2_object_service(user_data);
-    uid_t caller_uid = abrt_p2_service_caller_real_uid(service, caller, error);
-    if (caller_uid == (uid_t)-1)
-        return NULL;
-
-    AbrtP2Session *node = abrt_p2_object_get_node(user_data);
-    if (abrt_p2_session_check_sanity(node, caller, caller_uid, error) != 0)
-        return NULL;
-
-    return g_variant_new_boolean(abrt_p2_session_is_authorized(node));
-}
-
-GDBusInterfaceVTable *abrt_p2_session_vtable(void)
-{
-    static GDBusInterfaceVTable default_vtable =
-    {
-        .method_call = dbus_method_call,
-        .get_property = dbus_get_property,
-        .set_property = NULL,
-    };
-
-    return &default_vtable;
-}
-
-/* Public interface */
 
 AbrtP2Session *abrt_p2_session_new(char *caller, uid_t uid)
 {

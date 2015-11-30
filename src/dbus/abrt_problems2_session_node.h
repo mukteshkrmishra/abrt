@@ -48,11 +48,6 @@ PolkitAuthority *abrt_p2_session_class_set_polkit_authority(PolkitAuthority *pk_
 PolkitAuthority *abrt_p2_session_class_polkit_authority(void);
 PolkitAuthority *abrt_p2_session_class_release_polkit_authority(void);
 
-/*
- * D-Bus bindings
- */
-GDBusInterfaceVTable *abrt_p2_session_vtable(void);
-
 G_END_DECLS
 
 #endif/*ABRT_PROBLEMS2_SESSION_NODE*/
