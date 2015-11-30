@@ -995,7 +995,7 @@ static const char *entry_object_register_dump_dir(AbrtP2Service *service,
     struct user_info *user = abrt_p2_service_user_lookup(service, owner);
 
     if (user == NULL)
-        user = abrt_p2_service_user_insert(service, owner, user);
+        user = abrt_p2_service_user_new(service, owner);
 
     if (user->problems == ULONG_MAX)
     {

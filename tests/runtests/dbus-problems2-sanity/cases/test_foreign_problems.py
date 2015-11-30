@@ -29,7 +29,7 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
 
     def test_get_foreign_problem(self):
         with authorize_session(self) as p2_session:
-            p = self.p2.GetProblems()
+            p = self.p2.GetProblems(0)
 
             self.assertNotEqual(0, len(p), "no problems")
             self.assertIn(self.p2_entry_path, p, "missing our problem")
