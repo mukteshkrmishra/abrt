@@ -17,8 +17,7 @@
 */
 
 #include "libabrt.h"
-#include "abrt_problems2_entry_node.h"
-#include "abrt_problems2_service.h"
+#include "abrt_problems2_entry.h"
 
 #include <gio/gunixfdlist.h>
 

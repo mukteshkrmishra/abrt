@@ -25,9 +25,8 @@
 #include "problem_api.h"
 #include "abrt_problems2_generated_interfaces.h"
 #include "abrt_problems2_service.h"
-#include "abrt_problems2_node.h"
-#include "abrt_problems2_session_node.h"
-#include "abrt_problems2_entry_node.h"
+#include "abrt_problems2_session.h"
+#include "abrt_problems2_entry.h"
 
 /* Shared polkit authority */
 PolkitAuthority *g_polkit_authority;

@@ -32,10 +32,10 @@ abrt_dbus_LDADD = \
 libabrt_problems2_service_a_SOURCES = \
     abrt_problems2_service.c \
     abrt_problems2_service.h \
-    abrt_problems2_session_node.c \
-    abrt_problems2_session_node.h \
-    abrt_problems2_entry_node.c \
-    abrt_problems2_entry_node.h
+    abrt_problems2_session.c \
+    abrt_problems2_session.h \
+    abrt_problems2_entry.c \
+    abrt_problems2_entry.h
 # Manual dependency
 libabrt_problems2_service_a-abrt_problems2_service.$(OBJEXT): \
     abrt_problems2_generated_interfaces.h

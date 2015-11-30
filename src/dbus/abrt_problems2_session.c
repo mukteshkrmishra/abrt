@@ -16,8 +16,7 @@
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include "abrt_problems2_session_node.h"
-#include "abrt_problems2_service.h"
+#include "abrt_problems2_session.h"
 
 #include "libabrt.h"
 
