@@ -29,7 +29,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
         three = self.p2.NewProblem(description, 0)
         wait_for_hooks(self)
 
-        p = self.p2.GetProblems()
+        p = self.p2.GetProblems(0)
 
         self.assertIn(one, p)
         self.assertIn(two, p)
@@ -37,7 +37,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
 
         self.p2.DeleteProblems([one])
 
-        p = self.p2.GetProblems()
+        p = self.p2.GetProblems(0)
 
         self.assertNotIn(one, p)
         self.assertIn(two, p)
@@ -46,7 +46,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
         self.assertRaisesDBusError(DBUS_ERROR_BAD_ADDRESS,
                     self.p2.DeleteProblems, [two, three, one])
 
-        p = self.p2.GetProblems()
+        p = self.p2.GetProblems(0)
 
         self.assertNotIn(one, p)
         self.assertNotIn(two, p)

@@ -151,6 +151,10 @@ dbus-send --system --type=method_call --print-reply \
             <method name='GetProblems'>
                 <tp:docstring>Returns a list of problem identifiers for problems visible by the caller. If the session is authorized (GetSession), then the method returns all detected problems (system problems and problems of other users).</tp:docstring>
 
+                <arg type='i' name='flags' direction='in'>
+                    <tp:docstring>For future needs</tp:docstring>
+                </arg>
+
                 <arg type='ao' name='response' direction='out'>
                     <tp:docstring>List of problem objects paths</tp:docstring>
                 </arg>

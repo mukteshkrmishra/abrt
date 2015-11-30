@@ -21,7 +21,7 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
         self.root_p2.DeleteProblems([self.p2_entry_root_path])
 
     def test_get_problems(self):
-        p = self.p2.GetProblems()
+        p = self.p2.GetProblems(0)
 
         self.assertNotEqual(0, len(p), "no problems")
         self.assertIn(self.p2_entry_path, p, "missing our problem")
@@ -44,7 +44,7 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
                     "Properties are accessible")
 
     def test_foreign_problem_not_accessible(self):
-        p = self.p2.GetProblems()
+        p = self.p2.GetProblems(0)
 
         self.assertNotEqual(0, len(p), "no problems")
         self.assertIn(self.p2_entry_path, p, "missing our problem")
