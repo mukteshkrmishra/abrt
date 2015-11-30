@@ -30,15 +30,39 @@ G_DECLARE_FINAL_TYPE(AbrtP2Entry, abrt_p2_entry, ABRT_P2, ENTRY, GObject)
 
 AbrtP2Entry *abrt_p2_entry_new(char *dirname);
 
-int  abrt_p2_entry_remove(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
-int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid, struct dump_dir **dd);
-problem_data_t *abrt_p2_entry_problem_data(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
+int  abrt_p2_entry_delete(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
 
-GDBusInterfaceVTable *abrt_p2_entry_vtable(void);
+int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid,
+            struct dump_dir **dd);
 
+struct dump_dir *abrt_p2_entry_open_dump_dir(AbrtP2Entry *entry,
+             uid_t caller_uid, int dd_flags, GError **error);
+
+GVariant *abrt_p2_entry_problem_data(AbrtP2Entry *entry, uid_t caller_uid,
+            GError **error);
+
+GVariant *abrt_p2_entry_delete_elements(AbrtP2Entry *entry, uid_t caller_uid,
+            GVariant *elements, GError **error);
 
 /*
- * Utility functions
+ * Read elements
+ */
+enum AbrtP2EntryReadElementsFlags
+{
+    ABRT_P2_ENTRY_READ_ALL_FD             = 0x01,
+    ABRT_P2_ENTRY_READ_ALL_TYPES          = 0x02,
+    ABRT_P2_ENTRY_READ_ONLY_TEXT          = 0x04,
+    ABRT_P2_ENTRY_READ_ONLY_BIG_TEXT      = 0x08,
+    ABRT_P2_ENTRY_READ_ONLY_BINARY        = 0x10,
+    ABRT_P2_ENTRY_READ_ALL_NO_FD          = 0x20,
+};
+
+GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
+             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+             GError **error);
+
+/*
+ * Save elements
  */
 enum AbrP2EntrySaveElementsFlags
 {
@@ -59,19 +83,30 @@ typedef struct
     off_t    data_size;
 } AbrtP2EntrySaveElementsLimits;
 
-int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
+#define ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_INITIALIZER(l, ec, ds) \
+        do  { (l).elements_count = (ec); (l).data_size = (ds); } while (0)
+
+#define ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_ON_STACK(l, ec, ds) \
+        AbrtP2EntrySaveElementsLimits l; \
+        ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_INITIALIZER(l, ec, ds);
+
+
+GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits, GError **error);
+
+/*
+ * D-Bus Bindings
+ */
+GDBusInterfaceVTable *abrt_p2_entry_vtable(void);
+
+/*
+ * Utility functions
+ */
+
+int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
         GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
         AbrtP2EntrySaveElementsLimits *limits, GError **error);
-
-enum AbrtP2EntryReadElementsFlags
-{
-    ABRT_P2_ENTRY_READ_ALL_FD             = 0x01,
-    ABRT_P2_ENTRY_READ_ALL_TYPES          = 0x02,
-    ABRT_P2_ENTRY_READ_ONLY_TEXT          = 0x04,
-    ABRT_P2_ENTRY_READ_ONLY_BIG_TEXT      = 0x08,
-    ABRT_P2_ENTRY_READ_ONLY_BINARY        = 0x10,
-    ABRT_P2_ENTRY_READ_ALL_NO_FD          = 0x20,
-};
 
 G_END_DECLS
 

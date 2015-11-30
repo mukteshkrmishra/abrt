@@ -19,6 +19,7 @@
 #ifndef ABRT_PROBLEMS2_SESSION_NODE
 #define ABRT_PROBLEMS2_SESSION_NODE
 
+#include <polkit/polkit.h>
 #include <glib-object.h>
 #include <gio/gio.h>
 
@@ -33,7 +34,6 @@ uid_t abrt_p2_session_uid(AbrtP2Session *session);
 const char *abrt_p2_session_caller(AbrtP2Session *session);
 int abrt_p2_session_is_authorized(AbrtP2Session *session);
 
-
 gint32 abrt_p2_session_authorize(AbrtP2Session *session, GVariant *parameters);
 void abrt_p2_session_close(AbrtP2Session *session);
 int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid_t caller_uid, GError **error);
@@ -41,6 +41,16 @@ int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid
 const char *abrt_p2_session_locale(AbrtP2Session *session, char *locale);
 void abrt_p2_session_set_locale(AbrtP2Session *session, char *locale);
 
+/*
+ * Class methods
+ */
+PolkitAuthority *abrt_p2_session_class_set_polkit_authority(PolkitAuthority *pk_authority);
+PolkitAuthority *abrt_p2_session_class_polkit_authority(void);
+PolkitAuthority *abrt_p2_session_class_release_polkit_authority(void);
+
+/*
+ * D-Bus bindings
+ */
 GDBusInterfaceVTable *abrt_p2_session_vtable(void);
 
 G_END_DECLS

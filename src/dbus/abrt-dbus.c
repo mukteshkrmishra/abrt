@@ -817,7 +817,7 @@ static void on_bus_acquired(GDBusConnection *connection,
     GError *error = NULL;
 
     int r = abrt_p2_service_register_objects(ABRT_P2_SERVICE(user_data), connection, &error);
-    if (r == -EALREADY)
+    if (r == 0 || r == -EALREADY)
     {
         reset_timeout();
         return;
@@ -899,8 +899,8 @@ int main(int argc, char *argv[])
     if (err != NULL)
         error_msg_and_die("Invalid D-Bus interface: %s", err->message);
 
-    AbrtP2Service *service = abrt_p2_service_new(&err);
-    if (service == NULL)
+    AbrtP2Service *p2_service = abrt_p2_service_new(&err);
+    if (p2_service == NULL)
         error_msg_and_die("Failed to initialize Problems2 service: %s", err->message);
 
     owner_id = g_bus_own_name(G_BUS_TYPE_SYSTEM,
@@ -909,8 +909,8 @@ int main(int argc, char *argv[])
                              on_bus_acquired,
                              NULL,
                              on_name_lost,
-                             NULL,
-                             NULL);
+                             p2_service,
+                             g_object_unref);
 
     /* initialize the g_settings_dump_location */
     load_abrt_conf();
@@ -922,7 +922,6 @@ int main(int argc, char *argv[])
 
     g_bus_unown_name(owner_id);
 
-    g_object_unref(service);
     g_dbus_node_info_unref(introspection_data);
 
     free_abrt_conf_data();

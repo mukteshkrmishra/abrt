@@ -23,6 +23,44 @@
 
 #include <assert.h>
 
+static PolkitAuthority *s_pk_authority;
+
+PolkitAuthority *abrt_p2_session_class_set_polkit_authority(PolkitAuthority *pk_authority)
+{
+    if (s_pk_authority != NULL)
+    {
+        log_warning("Session: polkit Authority already initialized");
+
+        /*
+         * Introduce something like this to libreport
+        if (g_verbose > 3)
+            abort();
+        */
+        return s_pk_authority;
+    }
+
+    s_pk_authority = pk_authority;
+
+    return s_pk_authority;
+}
+
+PolkitAuthority *abrt_p2_session_class_polkit_authority(void)
+{
+    if (s_pk_authority == NULL)
+    {
+        log_debug("Session: Polkit Authority not-yet initialized");
+    }
+
+    return s_pk_authority;
+}
+
+PolkitAuthority *abrt_p2_session_class_release_polkit_authority(void)
+{
+    PolkitAuthority *pk_authority = s_pk_authority;
+    s_pk_authority = NULL;
+    return pk_authority;
+}
+
 typedef struct
 {
     char   *p2s_caller;
@@ -191,7 +229,7 @@ void authorization_request_initialize(AbrtP2Session *session, GVariant *paramete
         }
     }
 
-    polkit_authority_check_authorization(abrt_p2_polkit_authority(),
+    polkit_authority_check_authorization(abrt_p2_session_class_polkit_authority(),
                 subject,
                 "org.freedesktop.problems.getall",
                 details,

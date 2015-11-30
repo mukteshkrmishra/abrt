@@ -38,7 +38,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "executable"  : "/usr/bin/foo",
                            "type"        : dbus.types.UnixFd(type_file)}
 
-            self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: Element 'type' must be of 's' D-Bus type",
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: Failed to create new problem directory: Element 'type' must be of 's' D-Bus type",
                                   self.p2.NewProblem, description, 0)
 
 
@@ -50,7 +50,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                        "uuid"        : "NOT_ALLOWED_ELEMENTS",
                        "backtrace"   : "Machine Check Exception: fake" }
 
-        self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: You are not allowed to create element 'type' containing 'Kerneloops'",
+        self.assertRaisesDBusError("org.freedesktop.DBus.Error.InvalidArgs: Failed to create new problem directory: You are not allowed to create element 'type' containing 'Kerneloops'",
                               self.p2.NewProblem, description, 0)
 
         self.p2_entry_root_path = self.root_p2.NewProblem(description, 0)
@@ -97,7 +97,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
         for i in range(DBUS_LIMIT_ELEMENTS_COUNT + 1):
             too_many_elements[str(i)] = str(i)
 
-        self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements",
+        self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Failed to create new problem directory: Too many elements",
                         self.p2.NewProblem, too_many_elements, 0)
 
     def test_new_problem_data_size_limit(self):
@@ -113,7 +113,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "executable"  : "/usr/bin/foo",
                            "type"        : "abrt-problems2-sanity"}
 
-            self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Problem data is too big",
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.LimitsExceeded: Failed to create new problem directory: Problem data is too big",
                                   self.p2.NewProblem, description, 0)
 
     def test_non_readable_filedescriptor(self):
@@ -127,7 +127,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "executable"  : "/usr/bin/foo",
                            "type"        : "abrt-problems2-sanity"}
 
-            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to save data of passed file descriptor",
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to create new problem directory: Failed to save data of passed file descriptor",
                    self.p2.NewProblem, description, 0)
 
 

@@ -16,6 +16,8 @@
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
+#include <polkit/polkit.h>
+
 #include <glib-object.h>
 #include <gio/gio.h>
 #include "libabrt.h"
@@ -26,7 +28,9 @@
 #include "abrt_problems2_session_node.h"
 #include "abrt_problems2_entry_node.h"
 
+/* Shared polkit authority */
 PolkitAuthority *g_polkit_authority;
+int g_polkit_authority_refs;
 
 /*
  * DBus object type
@@ -139,8 +143,20 @@ static void abrt_p2_service_private_destroy(AbrtP2ServicePrivate *pv)
 
     if (pv->p2srv_pk_authority != NULL)
     {
-        g_object_unref(pv->p2srv_pk_authority);
         pv->p2srv_pk_authority = NULL;
+        --g_polkit_authority_refs;
+
+        if (g_polkit_authority_refs == 0)
+        {
+            PolkitAuthority *pk = abrt_p2_session_class_release_polkit_authority();
+            if (pk != g_polkit_authority)
+                log_notice("Session class uses custom Polkit Authority");
+            else
+            {
+                g_object_unref(g_polkit_authority);
+                g_polkit_authority = NULL;
+            }
+        }
     }
 }
 
@@ -178,13 +194,13 @@ static int abrt_p2_service_private_init(AbrtP2ServicePrivate *pv, GError **unuse
 
     if (g_polkit_authority != NULL)
     {
-        g_object_ref(g_polkit_authority);
+        ++g_polkit_authority_refs;
         pv->p2srv_pk_authority = g_polkit_authority;
         return 0;
     }
 
     GError *local_error = NULL;
-    pv->p2srv_pk_authority = polkit_authority_get_sync(NULL, &local_error);
+    g_polkit_authority = pv->p2srv_pk_authority = polkit_authority_get_sync(NULL, &local_error);
     if (pv->p2srv_pk_authority == NULL)
     {
         r = -1;
@@ -193,6 +209,8 @@ static int abrt_p2_service_private_init(AbrtP2ServicePrivate *pv, GError **unuse
         goto error_return;
     }
 
+    ++g_polkit_authority_refs;
+    abrt_p2_session_class_set_polkit_authority(g_polkit_authority);
     return 0;
 
 error_return:
@@ -366,7 +384,7 @@ struct abrt_p2_object *abrt_p2_object_new(AbrtP2Service *service,
 
     if (registration_id == 0)
     {
-        g_prefix_error(error, "Failed to register path:'%s', interface: %s",
+        g_prefix_error(error, "Failed to register path:'%s', interface: %s: ",
                 path, type->iface->name);
 
         abrt_p2_object_free(obj);
@@ -386,8 +404,6 @@ struct abrt_p2_object *abrt_p2_object_new(AbrtP2Service *service,
 /*
  * /org/freedesktop/Problems2/Session/XYZ
  */
-static struct problems2_object_type g_problems2_session_type;
-
 static void session_object_destructor(struct abrt_p2_object *obj)
 {
     AbrtP2Session *session = (AbrtP2Session *)obj->node;
@@ -438,7 +454,7 @@ static struct abrt_p2_object *session_object_register(AbrtP2Service *service,
     AbrtP2Session *session = abrt_p2_session_new(dup_caller, caller_uid);
 
     struct abrt_p2_object *obj = abrt_p2_object_new(service,
-                                  &g_problems2_session_type,
+                                  &(service->pv->p2srv_p2_session_type),
                                   path,
                                   session,
                                   session_object_destructor,
@@ -446,7 +462,7 @@ static struct abrt_p2_object *session_object_register(AbrtP2Service *service,
 
     if (obj == NULL)
     {
-        g_prefix_error(error, "Failed to register Session object for caller '%s'", caller);
+        g_prefix_error(error, "Failed to register Session object for caller '%s': ", caller);
         return NULL;
     }
 
@@ -528,11 +544,6 @@ uid_t abrt_p2_service_caller_uid(AbrtP2Service *service, const char *caller, GEr
 /*
  * Utility functions
  */
-PolkitAuthority *abrt_p2_polkit_authority(void)
-{
-    return g_polkit_authority;
-}
-
 uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service, const char *caller, GError **error)
 {
     guint caller_uid;
@@ -561,8 +572,6 @@ uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service, const char *caller
 /*
  * /org/freedesktop/Problems2/Entry/XYZ
  */
-static struct problems2_object_type g_problems2_entry_type;
-
 static void entry_object_destructor(struct abrt_p2_object *obj)
 {
     AbrtP2Entry *entry = (AbrtP2Entry *)obj->node;
@@ -580,7 +589,7 @@ static const char *register_dump_dir_entry_node(AbrtP2Service *service,
     AbrtP2Entry *entry = abrt_p2_entry_new(dup_dirname);
 
     struct abrt_p2_object *obj = abrt_p2_object_new(service,
-                                  &g_problems2_entry_type,
+                                  &(service->pv->p2srv_p2_entry_type),
                                   path,
                                   entry,
                                   entry_object_destructor,
@@ -588,7 +597,7 @@ static const char *register_dump_dir_entry_node(AbrtP2Service *service,
 
     if (obj == NULL)
     {
-        g_prefix_error(error, "Failed to register Entry object for directory '%s'", dd_dirname);
+        g_prefix_error(error, "Failed to register Entry object for directory '%s': ", dd_dirname);
         return NULL;
     }
 
@@ -624,7 +633,7 @@ struct save_problem_args
 static int wrapped_abrt_p2_entry_save_elements(struct dump_dir *dd,
         struct save_problem_args *args)
 {
-    return abrt_p2_entry_save_elements(dd,
+    return abrt_p2_entry_save_elements_in_dump_dir(dd,
                                        ABRT_P2_ENTRY_ALL_FATAL,
                                        args->problem_info,
                                        args->fd_list,
@@ -646,8 +655,9 @@ const char *abrt_p2_service_save_problem(
         .error = error,
     };
 
-    args.limits.elements_count = abrt_p2_service_elements_limit(service, caller_uid);
-    args.limits.data_size      = abrt_p2_service_data_size_limit(service, caller_uid);
+    ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_INITIALIZER(args.limits,
+                        abrt_p2_service_elements_limit(service, caller_uid),
+                        abrt_p2_service_data_size_limit(service, caller_uid));
 
     struct dump_dir *dd = create_dump_dir(g_settings_dump_location,
                                           type_str,
@@ -657,8 +667,7 @@ const char *abrt_p2_service_save_problem(
 
     if (dd == NULL)
     {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                "Failed to create new problem directory");
+        g_prefix_error(error, "Failed to create new problem directory: ");
         return NULL;
     }
 
@@ -692,7 +701,7 @@ int abrt_p2_service_remove_problem(AbrtP2Service *service,
         return -ENOENT;
     }
 
-    const int ret = abrt_p2_entry_remove(ABRT_P2_ENTRY(obj->node), caller_uid, error);
+    const int ret = abrt_p2_entry_delete(ABRT_P2_ENTRY(obj->node), caller_uid, error);
     if (ret != 0)
         return ret;
 
@@ -700,7 +709,7 @@ int abrt_p2_service_remove_problem(AbrtP2Service *service,
     return 0;
 }
 
-problem_data_t *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
+GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error)
 {
     struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
@@ -735,8 +744,6 @@ GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
 /*
  * Service functions + /org/freedesktop/Problems2
  */
-static struct problems2_object_type g_problems2_type;
-
 struct bridge_call_args
 {
     AbrtP2Service *service;
@@ -767,8 +774,9 @@ static void on_g_signal(GDBusProxy *proxy,
     if (bus_name[0] == '\0' || old_owner[0] == '\0' || new_owner[0] != '\0')
         return;
 
+    AbrtP2Service *service = ABRT_P2_SERVICE(user_data);
     GHashTableIter iter;
-    g_hash_table_iter_init(&iter, g_problems2_session_type.objects);
+    g_hash_table_iter_init(&iter, service->pv->p2srv_p2_session_type.objects);
 
     const char *p;
     struct abrt_p2_object *obj;
@@ -797,7 +805,7 @@ int abrt_p2_service_register_objects(AbrtP2Service *service, GDBusConnection *co
     service->pv->p2srv_dbus = connection;
 
     service->pv->p2srv_p2_object = abrt_p2_object_new(service,
-                                  &g_problems2_type,
+                                  &(service->pv->p2srv_p2_type),
                                   (char *)ABRT_P2_PATH,
                                   /*node*/NULL,
                                   /*node destructor*/NULL,
@@ -805,7 +813,7 @@ int abrt_p2_service_register_objects(AbrtP2Service *service, GDBusConnection *co
 
     if (service->pv->p2srv_p2_object == 0)
     {
-        g_prefix_error(error, "Failed to register Problems2 node");
+        g_prefix_error(error, "Failed to register Problems2 node: ");
         return -1;
     }
 
@@ -817,7 +825,7 @@ int abrt_p2_service_register_objects(AbrtP2Service *service, GDBusConnection *co
 
     if (*args.error != NULL)
     {
-        g_prefix_error(error, "Failed to register Problems objects");
+        g_prefix_error(error, "Failed to register Problems objects: ");
         return -1;
     }
 
@@ -833,7 +841,7 @@ int abrt_p2_service_register_objects(AbrtP2Service *service, GDBusConnection *co
 
 
     if (local_error == NULL)
-        g_signal_connect(service->pv->p2srv_proxy_dbus, "g-signal", G_CALLBACK(on_g_signal), NULL);
+        g_signal_connect(service->pv->p2srv_proxy_dbus, "g-signal", G_CALLBACK(on_g_signal), service);
     else
     {
         error_msg("Failed to initialize proxy to DBus: %s", local_error->message);

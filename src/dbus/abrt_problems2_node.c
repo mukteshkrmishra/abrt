@@ -185,7 +185,7 @@ static GVariant *handle_NewProblem(AbrtP2Service *service,
     return g_variant_new("(o)", new_path);
 }
 
-GVariant *handle_GetSession(AbrtP2Service *service, const char *caller, GError **error)
+static GVariant *handle_GetSession(AbrtP2Service *service, const char *caller, GError **error)
 {
     const char *session_path = abrt_p2_service_session_path(service, caller, error);
 
@@ -195,7 +195,7 @@ GVariant *handle_GetSession(AbrtP2Service *service, const char *caller, GError *
     return g_variant_new("(o)", session_path);
 }
 
-GVariant *handle_GetProblems(AbrtP2Service *service, uid_t caller_uid)
+static GVariant *handle_GetProblems(AbrtP2Service *service, uid_t caller_uid)
 {
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("ao"));
@@ -208,39 +208,6 @@ GVariant *handle_GetProblems(AbrtP2Service *service, uid_t caller_uid)
     return g_variant_new("(ao)", &builder);
 }
 
-GVariant *handle_GetProblemData(AbrtP2Service *service, const char *entry_path, uid_t caller_uid, GError **error)
-{
-    problem_data_t *pd = abrt_p2_service_entry_problem_data(service, entry_path, caller_uid, error);
-    if (NULL == pd)
-        return NULL;
-
-    GVariantBuilder response_builder;
-    g_variant_builder_init(&response_builder, G_VARIANT_TYPE_ARRAY);
-
-    GHashTableIter pd_iter;
-    char *element_name;
-    struct problem_item *element_info;
-    g_hash_table_iter_init(&pd_iter, pd);
-    while (g_hash_table_iter_next(&pd_iter, (void**)&element_name, (void**)&element_info))
-    {
-        unsigned long size = 0;
-        if (problem_item_get_size(element_info, &size) != 0)
-        {
-            log_notice("Can't get stat of : '%s'", element_info->content);
-            continue;
-        }
-
-        g_variant_builder_add(&response_builder, "{s(its)}",
-                                                element_name,
-                                                element_info->flags,
-                                                size,
-                                                element_info->content);
-    }
-
-    problem_data_free(pd);
-
-    return g_variant_new("(a{s(its)})", &response_builder);
-}
 
 static GVariant *handle_DeleteProblems(AbrtP2Service *service,
             GVariant *entries, uid_t caller_uid, GError **error)
@@ -317,7 +284,8 @@ static void dbus_method_call(GDBusConnection *connection,
         /* Parameter tuple is (0) */
         const char *entry_path;
         g_variant_get(parameters, "(&o)", &entry_path);
-        response = handle_GetProblemData(service, entry_path, caller_uid, &error);
+
+        response = abrt_p2_service_entry_problem_data(service, entry_path, caller_uid, &error);
     }
     else if (strcmp("DeleteProblems", method_name) == 0)
     {

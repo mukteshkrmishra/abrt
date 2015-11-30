@@ -81,7 +81,7 @@ int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid, struct dump_d
     return ret;
 }
 
-int abrt_p2_entry_remove(AbrtP2Entry *entry, uid_t caller_uid, GError **error)
+int abrt_p2_entry_delete(AbrtP2Entry *entry, uid_t caller_uid, GError **error)
 {
     struct dump_dir *dd = NULL;
     int ret = abrt_p2_entry_accessible_by_uid(entry, caller_uid, &dd);
@@ -112,50 +112,82 @@ int abrt_p2_entry_remove(AbrtP2Entry *entry, uid_t caller_uid, GError **error)
     return ret;
 }
 
-problem_data_t *abrt_p2_entry_problem_data(AbrtP2Entry *node, uid_t caller_uid, GError **error)
+GVariant *abrt_p2_entry_problem_data(AbrtP2Entry *node, uid_t caller_uid, GError **error)
 {
-    struct dump_dir *dd = NULL;
-
-    if (abrt_p2_entry_accessible_by_uid(node, caller_uid, &dd) != 0)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
-                    "You are not authorized to access the problem");
-        return NULL;
-    }
-
-    dd = dd_fdopendir(dd, DD_OPEN_READONLY);
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(node, caller_uid, DD_OPEN_READONLY, error);
     if (dd == NULL)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                "Cannot lock the problem. Check system logs.");
         return NULL;
-    }
 
     problem_data_t *pd = create_problem_data_from_dump_dir(dd);
+
+    GVariantBuilder response_builder;
+    g_variant_builder_init(&response_builder, G_VARIANT_TYPE_ARRAY);
+
+    GHashTableIter pd_iter;
+    char *element_name;
+    struct problem_item *element_info;
+    g_hash_table_iter_init(&pd_iter, pd);
+    while (g_hash_table_iter_next(&pd_iter, (void**)&element_name, (void**)&element_info))
+    {
+        unsigned long size = 0;
+        if (problem_item_get_size(element_info, &size) != 0)
+        {
+            log_notice("Can't get stat of : '%s'", element_info->content);
+            continue;
+        }
+
+        g_variant_builder_add(&response_builder, "{s(its)}",
+                                                element_name,
+                                                element_info->flags,
+                                                size,
+                                                element_info->content);
+    }
+
+    problem_data_free(pd);
     dd_close(dd);
 
-    return pd;
+    return g_variant_new("(a{s(its)})", &response_builder);
 }
 
-static AbrtP2Entry *get_entry(struct abrt_p2_object *object,
-                          uid_t caller_uid,
-                          struct dump_dir **dd,
-                          GError **error)
+struct dump_dir *abrt_p2_entry_open_dump_dir(AbrtP2Entry *entry,
+              uid_t caller_uid, int dd_flags, GError **error)
 {
-    AbrtP2Entry *node = abrt_p2_object_get_node(object);
-    if (0 != abrt_p2_entry_accessible_by_uid(node, caller_uid, dd))
+    struct dump_dir *dd = NULL;
+    if (0 != abrt_p2_entry_accessible_by_uid(entry, caller_uid, &dd))
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_ACCESS_DENIED,
                     "You are not authorized to access the problem");
         return NULL;
     }
 
-    return node;
+    dd = dd_fdopendir(dd, dd_flags);
+    if (dd == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                    "Failed reopen dump directory");
+        return NULL;
+    }
+
+    return dd;
 }
 
-static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
-                                     GVariant *elements, GUnixFDList *fd_list)
+GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
+             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+             GError **error)
 {
+    if ((flags & ABRT_P2_ENTRY_READ_ALL_FD) && (flags & ABRT_P2_ENTRY_READ_ALL_NO_FD))
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
+                        "Invalid arguments 'ALL FD' ~ 'ALL NO FD'");
+        return NULL;
+    }
+
+
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(entry, caller_uid,
+                DD_OPEN_READONLY | DD_DONT_WAIT_FOR_LOCK, error);
+    if (dd == NULL)
+        return NULL;
+
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("a{sv}"));
 
@@ -249,7 +281,23 @@ static GVariant *handle_ReadElements(struct dump_dir *dd, gint32 flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
+
+GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits, GError **error)
+{
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(entry, caller_uid,
+                                                DD_DONT_WAIT_FOR_LOCK, error);
+    if (dd == NULL)
+        return NULL;
+
+    abrt_p2_entry_save_elements_in_dump_dir(dd, flags, elements,
+                fd_list, caller_uid, limits, error);
+
+    return NULL;
+}
+
+int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
         GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
         AbrtP2EntrySaveElementsLimits *limits, GError **error)
 {
@@ -318,7 +366,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
             continue;
         }
 
-        const off_t base_size = limits->data_size - item_stat.st_size;
+        const off_t base_size = dd_size - item_stat.st_size;
 
         if (   g_variant_is_of_type(value, G_VARIANT_TYPE_STRING)
             || g_variant_is_of_type(value, G_VARIANT_TYPE_BYTESTRING))
@@ -366,7 +414,7 @@ int abrt_p2_entry_save_elements(struct dump_dir *dd, gint32 flags,
                 && data_size > item_stat.st_size
                 && base_size + data_size > limits->data_size)
             {
-                error_msg("Cannot save text element: problem data size limit %ld", limits->data_size);
+                error_msg("Cannot save text element: problem data size limit %ld, data size %ld, item size %ld, base size %ld", limits->data_size, data_size, item_stat.st_size, base_size);
                 if (flags & ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL)
                     goto exit_loop_on_too_big_data;
                 continue;
@@ -464,8 +512,15 @@ exit_loop_on_error:
     return retval;
 }
 
-static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
+GVariant *abrt_p2_entry_delete_elements(AbrtP2Entry *entry, uid_t caller_uid,
+            GVariant *elements, GError **error)
 {
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(entry, caller_uid,
+            DD_DONT_WAIT_FOR_LOCK, error);
+
+    if (dd == NULL)
+        return NULL;
+
     gchar *name = NULL;
     GVariantIter iter;
     g_variant_iter_init(&iter, elements);
@@ -475,10 +530,16 @@ static void handle_DeleteElements(struct dump_dir *dd, GVariant *elements)
     {
         log_debug("Deleting element: %s", name);
         const int r = dd_delete_item(dd, name);
+
         if (r == -EINVAL)
             error_msg("Attempt to remove prohibited data: '%s'", name);
     }
+
+    dd_close(dd);
+
+    return NULL;
 }
+
 
 /* D-Bus method handler
  */
@@ -504,124 +565,81 @@ static void dbus_method_call(GDBusConnection *connection,
         return;
     }
 
-    struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(user_data, caller_uid, &dd, &error);
-    if (node == NULL)
-    {
-        g_dbus_method_invocation_return_gerror(invocation, error);
-        g_error_free(error);
-        return;
-    }
-
+    GVariant *response = NULL;
+    GUnixFDList *out_fd_list = NULL;
+    AbrtP2Entry *entry = abrt_p2_object_get_node(user_data);
     if (strcmp(method_name, "GetSemanticElement") == 0)
     {
         return;
     }
-
-    if (strcmp(method_name, "SetSemanticElement") == 0)
+    else if (strcmp(method_name, "SetSemanticElement") == 0)
     {
         return;
     }
-
-    if (strcmp(method_name, "ReadElements") == 0)
+    else if (strcmp(method_name, "ReadElements") == 0)
     {
-        dd = dd_fdopendir(dd, DD_OPEN_READONLY | DD_DONT_WAIT_FOR_LOCK);
-        if (dd == NULL)
-        {
-            g_dbus_method_invocation_return_error(invocation,
-                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                            "Failed to obtain the lock");
-            return;
-        }
-
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        if ((flags & ABRT_P2_ENTRY_READ_ALL_FD) && (flags & ABRT_P2_ENTRY_READ_ALL_NO_FD))
-        {
-            g_dbus_method_invocation_return_error(invocation,
-                            G_DBUS_ERROR, G_DBUS_ERROR_INVALID_ARGS,
-                            "Failed to obtain the lock");
-            return;
-        }
-
-        GUnixFDList *fd_list = g_unix_fd_list_new();
-
-        GVariant *retval = handle_ReadElements(dd, flags, elements, fd_list);
-        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation, retval, fd_list);
+        out_fd_list = g_unix_fd_list_new();
+        response = abrt_p2_entry_read_elements(entry, flags, elements,
+                                               out_fd_list, caller_uid, &error);
 
         g_variant_unref(elements);
-        g_object_unref(fd_list);
-        dd_close(dd);
-        return;
     }
-
-    if (strcmp(method_name, "SaveElements") == 0)
+    else if (strcmp(method_name, "SaveElements") == 0)
     {
-        dd = dd_fdopendir(dd, DD_OPEN_READONLY | DD_DONT_WAIT_FOR_LOCK);
-        if (dd == NULL)
-        {
-            g_dbus_method_invocation_return_error(invocation,
-                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                            "Failed to obtain the lock");
-            return;
-        }
-
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
         GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
-        GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
+        GUnixFDList *in_fd_list = g_dbus_message_get_unix_fd_list(msg);
 
-        AbrtP2EntrySaveElementsLimits limits;
-        limits.elements_count = abrt_p2_service_elements_limit(service, caller_uid);
-        limits.data_size = abrt_p2_service_data_size_limit(service, caller_uid);
+        ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_ON_STACK(limits,
+                    abrt_p2_service_elements_limit(service, caller_uid),
+                    abrt_p2_service_data_size_limit(service, caller_uid));
 
-        int r = abrt_p2_entry_save_elements(dd, flags, elements, fd_list,
-                                            caller_uid, &limits, &error);
-        if (r != 0)
-        {
-            g_dbus_method_invocation_return_gerror(invocation, error);
-            g_error_free(error);
-        }
-        else
-            g_dbus_method_invocation_return_value(invocation, NULL);
+        response = abrt_p2_entry_save_elements(entry, flags, elements,
+                                    in_fd_list, caller_uid, &limits, &error);
 
         g_variant_unref(elements);
-        dd_close(dd);
-        return;
     }
-
-    if (strcmp(method_name, "DeleteElements") == 0)
+    else if (strcmp(method_name, "DeleteElements") == 0)
     {
-        dd = dd_fdopendir(dd, DD_DONT_WAIT_FOR_LOCK);
-        if (dd == NULL)
-        {
-            g_dbus_method_invocation_return_error(invocation,
-                            G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
-                            "Failed to obtain the lock");
-            return;
-        }
-
         GVariant *elements = g_variant_get_child_value(parameters, 0);
 
-        handle_DeleteElements(dd, elements);
-        g_dbus_method_invocation_return_value(invocation, NULL);
+        response = abrt_p2_entry_delete_elements(entry, caller_uid, elements,
+                                                 &error);
 
         g_variant_unref(elements);
-        dd_close(dd);
-        return;
+    }
+    else
+    {
+        error_msg("BUG: org.freedesktop.Problems2.Entry does not have method: %s", method_name);
+        g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
+                "The method has to be implemented");
     }
 
-    dd_close(dd);
-    error_msg("BUG: org.freedesktop.Problems2.Entry does not have method: %s", method_name);
-    g_dbus_method_invocation_return_error(invocation, G_DBUS_ERROR, G_DBUS_ERROR_UNKNOWN_METHOD,
-            "The method has to be implemented");
+    if (error != NULL)
+    {
+        g_dbus_method_invocation_return_gerror(invocation, error);
+        g_error_free(error);
+    }
+    else if (out_fd_list != NULL)
+    {
+        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation,
+                                                                response,
+                                                                out_fd_list);
+        g_object_unref(out_fd_list);
+    }
+    else
+        g_dbus_method_invocation_return_value(invocation, response);
 }
+
 
 #define GET_PLAIN_TEXT_PROPERTY(name, element) \
         if (strcmp(name, property_name) == 0) \
@@ -661,9 +679,10 @@ static GVariant *dbus_get_property(GDBusConnection *connection,
         return NULL;
 
     GVariant *retval;
-    struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(user_data, caller_uid, &dd, error);
-    if (node == NULL)
+    AbrtP2Entry *entry = abrt_p2_object_get_node(user_data);
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(entry, caller_uid,
+                              DD_DONT_WAIT_FOR_LOCK | DD_OPEN_READONLY, error);
+    if (dd == NULL)
         return NULL;
 
     if (strcmp("id", property_name) == 0)
@@ -820,9 +839,10 @@ static gboolean dbus_set_property(GDBusConnection *connection,
     if (caller_uid == (uid_t)-1)
         return FALSE;
 
-    struct dump_dir *dd;
-    AbrtP2Entry *node = get_entry(user_data, caller, &dd, error);
-    if (node == NULL)
+    AbrtP2Entry *entry = abrt_p2_object_get_node(user_data);
+    struct dump_dir *dd = abrt_p2_entry_open_dump_dir(entry, caller_uid,
+                                                  DD_DONT_WAIT_FOR_LOCK, error);
+    if (entry == NULL)
         return FALSE;
 
     if (strcmp("id", property_name) == 0)

@@ -18,8 +18,8 @@
 #ifndef ABRT_PROBLEMS2_SERVICE_H
 #define ABRT_PROBLEMS2_SERVICE_H
 
-#include <libreport/problem_data.h>
-#include <polkit/polkit.h>
+#include <glib-object.h>
+#include <gio/gio.h>
 
 #define ABRT_P2_BUS "org.freedesktop.problems"
 #define ABRT_P2_PATH "/org/freedesktop/Problems2"
@@ -56,7 +56,7 @@ const char *abrt_p2_service_save_problem(
 int abrt_p2_service_remove_problem(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error);
 
-problem_data_t *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
+GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error);
 
 GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
@@ -91,10 +91,5 @@ void abrt_p2_object_destroy(struct abrt_p2_object *object);
 
 void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
             const char *member, GVariant *parameters);
-
-/*
- * Utilities
- */
-PolkitAuthority *abrt_p2_polkit_authority(void);
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/
