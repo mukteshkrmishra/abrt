@@ -1322,6 +1322,70 @@ GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
     return g_variant_new("(o)", new_path);
 }
 
+typedef struct
+{
+    GVariant *problem_info;
+    gint32 flags;
+    uid_t caller_uid;
+    GUnixFDList *fd_list;
+} AbrtP2ServiceNewProblemData;
+
+#define abrt_p2_service_new_problem_data_new() \
+    xmalloc(sizeof(AbrtP2ServiceNewProblemData))
+
+static void abrt_p2_service_new_problem_data_free(AbrtP2ServiceNewProblemData *data)
+{
+    free(data);
+}
+
+static void abrt_p2_service_new_problem_async_task(GTask *task,
+            gpointer source_object, gpointer task_data,
+            GCancellable *cancellable)
+{
+    AbrtP2Service *service = source_object;
+    AbrtP2ServiceNewProblemData *data = task_data;
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_service_new_problem(service,
+                            data->problem_info, data->flags, data->caller_uid,
+                            data->fd_list, &error);
+
+    if (error == NULL)
+        g_task_return_pointer(task, response, (GDestroyNotify)g_variant_unref);
+    else
+        g_task_return_error(task, error);
+}
+
+void abrt_p2_service_new_problem_async(AbrtP2Service *service,
+                   GVariant *problem_info, gint32 flags, uid_t caller_uid,
+                   GUnixFDList *fd_list,
+                   GCancellable *cancellable, GAsyncReadyCallback callback,
+                   gpointer user_data)
+{
+    AbrtP2ServiceNewProblemData *data = abrt_p2_service_new_problem_data_new();
+    data->problem_info = problem_info;
+    data->flags = flags;
+    data->caller_uid = caller_uid;
+    data->fd_list = fd_list;
+
+    GTask *task = g_task_new(service, cancellable, callback, user_data);
+    g_task_set_task_data(task, data, (GDestroyNotify)abrt_p2_service_new_problem_data_free);
+    g_task_run_in_thread(task, abrt_p2_service_new_problem_async_task);
+    g_object_unref(task);
+    return;
+}
+
+GVariant *abrt_p2_service_new_problem_finish(AbrtP2Service *service,
+                   GAsyncResult *result, GError **error)
+{
+    g_return_val_if_fail(g_task_is_valid(result, service), NULL);
+
+    return g_task_propagate_pointer(G_TASK(result), error);
+}
+
+/**
+ * Converts caller to the path of session object
+ */
 GVariant *abrt_p2_service_callers_session(AbrtP2Service *service, const char *caller,
             GError **error)
 {
@@ -1368,6 +1432,37 @@ GVariant *abrt_p2_service_delete_problems(AbrtP2Service *service,
 
 /* D-Bus method handler
  */
+
+struct p2_object_new_problem_context
+{
+    GDBusMethodInvocation *invocation;
+    GVariant* data;
+};
+
+static void p2_object_new_problem_cb(GObject *source_object,
+            GAsyncResult *result, gpointer user_data)
+{
+    AbrtP2Service *service = ABRT_P2_SERVICE(source_object);
+    struct p2_object_new_problem_context *context = user_data;
+
+    g_variant_unref(context->data);
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_service_new_problem_finish(service, result, &error);
+
+    if (error == NULL)
+    {
+        g_dbus_method_invocation_return_value(context->invocation, response);
+    }
+    else
+    {
+        g_dbus_method_invocation_return_gerror(context->invocation, error);
+        g_error_free(error);
+    }
+
+    free(context);
+}
+
 static void p2_object_dbus_method_call(GDBusConnection *connection,
                         const gchar *caller,
                         const gchar *object_path,
@@ -1407,8 +1502,16 @@ static void p2_object_dbus_method_call(GDBusConnection *connection,
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        response = abrt_p2_service_new_problem(service, data, flags, caller_uid, fd_list, &error);
-        g_variant_unref(data);
+        struct p2_object_new_problem_context *context = xmalloc(sizeof(*context));
+        context->invocation = g_object_ref(invocation);
+        context->data = data;
+
+        GCancellable *cancellable = g_cancellable_new();
+        abrt_p2_service_new_problem_async(service, data, flags,
+                caller_uid, fd_list, cancellable,
+                p2_object_new_problem_cb, context);
+
+        return;
     }
     else if (strcmp("GetSession", method_name) == 0)
     {

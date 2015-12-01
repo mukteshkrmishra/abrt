@@ -68,6 +68,15 @@ GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
             GVariant *problem_info, gint32 flags, uid_t caller_uid,
             GUnixFDList *fd_list, GError **error);
 
+void abrt_p2_service_new_problem_async(AbrtP2Service *service,
+                   GVariant *problem_info, gint32 flags, uid_t caller_uid,
+                   GUnixFDList *fd_list,
+                   GCancellable *cancellable, GAsyncReadyCallback callback,
+                   gpointer user_data);
+
+GVariant *abrt_p2_service_new_problem_finish(AbrtP2Service *service,
+                   GAsyncResult *result, GError **error);
+
 GVariant *abrt_p2_service_callers_session(AbrtP2Service *service,
             const char *caller, GError **error);
 
