@@ -15,8 +15,8 @@
   with this program; if not, write to the Free Software Foundation, Inc.,
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
-#ifndef abrt_p2_entry_H
-#define abrt_p2_entry_H
+#ifndef ABRT_P2_ENTRY_H
+#define ABRT_P2_ENTRY_H
 
 #include "libabrt.h"
 
@@ -95,13 +95,22 @@ GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
             AbrtP2EntrySaveElementsLimits *limits, GError **error);
 
+void abrt_p2_entry_save_elements_async(AbrtP2Entry *entry, gint32 flags,
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits,
+            GCancellable *cancellable, GAsyncReadyCallback callback,
+            gpointer user_data);
+
+GVariant *abrt_p2_entry_save_elements_finish(AbrtP2Entry *entry,
+            GAsyncResult *result, GError **error);
+
 /*
  * Utility functions
  */
 int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
-        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
-        AbrtP2EntrySaveElementsLimits *limits, GError **error);
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits, GError **error);
 
 G_END_DECLS
 
-#endif/*abrt_p2_entry_H*/
+#endif/*ABRT_P2_ENTRY_H*/

@@ -280,7 +280,9 @@ GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
-
+/**
+ * Save elements
+ */
 GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
             AbrtP2EntrySaveElementsLimits *limits, GError **error)
@@ -290,15 +292,18 @@ GVariant *abrt_p2_entry_save_elements(AbrtP2Entry *entry, gint32 flags,
     if (dd == NULL)
         return NULL;
 
-    abrt_p2_entry_save_elements_in_dump_dir(dd, flags, elements,
-                fd_list, caller_uid, limits, error);
+    abrt_p2_entry_save_elements_in_dump_dir(dd, flags, elements, fd_list,
+                                            caller_uid, limits, error);
 
     return NULL;
 }
 
+/**
+ * Save elements in a dump directory
+ */
 int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
-        GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
-        AbrtP2EntrySaveElementsLimits *limits, GError **error)
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits, GError **error)
 {
     int retval = 0;
 
@@ -413,7 +418,9 @@ int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
                 && data_size > item_stat.st_size
                 && base_size + data_size > limits->data_size)
             {
-                error_msg("Cannot save text element: problem data size limit %ld, data size %ld, item size %ld, base size %ld", limits->data_size, data_size, item_stat.st_size, base_size);
+                error_msg("Cannot save text element: problem data size limit %ld, data size %ld, item size %ld, base size %ld",
+                            limits->data_size, data_size, item_stat.st_size, base_size);
+
                 if (flags & ABRT_P2_ENTRY_DATA_SIZE_LIMIT_FATAL)
                     goto exit_loop_on_too_big_data;
                 continue;
@@ -453,7 +460,9 @@ int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
             }
 
             /* Do not allow dump dir growing */
-            const off_t max_size = base_size > limits->data_size ? item_stat.st_size : limits->data_size - base_size;
+            const off_t max_size = base_size > limits->data_size
+                                    ? item_stat.st_size
+                                    : limits->data_size - base_size;
             const off_t r = dd_copy_fd(dd, name, fd, /*copy_flags*/0, max_size);
             close(fd);
 
@@ -511,6 +520,75 @@ exit_loop_on_error:
     return retval;
 }
 
+/**
+ * Asynchronous version of Save elements
+ */
+typedef struct {
+    gint32 flags;
+    GVariant *elements;
+    GUnixFDList *fd_list;
+    uid_t caller_uid;
+    AbrtP2EntrySaveElementsLimits limits;
+} AbrtP2EntrySaveElementsData;
+
+#define abrt_p2_entry_save_elements_data_new() \
+    xmalloc(sizeof(AbrtP2EntrySaveElementsData))
+
+static inline void abrt_p2_entry_save_elements_data_free(AbrtP2EntrySaveElementsData *data)
+{
+    free(data);
+}
+
+static void abrt_p2_entry_save_elements_async_task(GTask *task,
+            gpointer source_object, gpointer task_data,
+            GCancellable *cancellable)
+{
+    AbrtP2Entry *entry = source_object;
+    AbrtP2EntrySaveElementsData *data = task_data;
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_entry_save_elements(entry, data->flags,
+            data->elements, data->fd_list, data->caller_uid, &(data->limits),
+            &error);
+
+    if (error == NULL)
+        g_task_return_pointer(task, response, (GDestroyNotify)g_variant_unref);
+    else
+        g_task_return_error(task, error);
+}
+
+void abrt_p2_entry_save_elements_async(AbrtP2Entry *entry, gint32 flags,
+            GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+            AbrtP2EntrySaveElementsLimits *limits,
+            GCancellable *cancellable, GAsyncReadyCallback callback,
+            gpointer user_data)
+{
+    AbrtP2EntrySaveElementsData *data = abrt_p2_entry_save_elements_data_new();
+    data->flags = flags;
+    data->elements = elements;
+    data->fd_list = fd_list;
+    data->caller_uid = caller_uid;
+    data->limits = *limits;
+
+    GTask *task = g_task_new(entry, cancellable, callback, user_data);
+    g_task_set_task_data(task, data, (GDestroyNotify)abrt_p2_entry_save_elements_data_free);
+    g_task_run_in_thread(task,  abrt_p2_entry_save_elements_async_task);
+    g_object_unref(task);
+    return;
+}
+
+GVariant *abrt_p2_entry_save_elements_finish(AbrtP2Entry *entry,
+            GAsyncResult *result, GError **error)
+{
+    g_return_val_if_fail(g_task_is_valid(result, entry), NULL);
+
+    return g_task_propagate_pointer(G_TASK(result), error);
+}
+
+
+/**
+ * Delete elements
+ */
 GVariant *abrt_p2_entry_delete_elements(AbrtP2Entry *entry, uid_t caller_uid,
             GVariant *elements, GError **error)
 {

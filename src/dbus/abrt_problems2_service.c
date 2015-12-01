@@ -534,6 +534,36 @@ uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service, const char *caller
 /*
  * /org/freedesktop/Problems2/Entry/XYZ
  */
+struct entry_object_save_elements_context
+{
+    GDBusMethodInvocation *invocation;
+    GVariant *elements;
+};
+
+static void entry_object_save_elements_cb(GObject *source_object,
+            GAsyncResult *result, gpointer user_data)
+{
+    AbrtP2Entry *entry = ABRT_P2_ENTRY(source_object);
+    struct entry_object_save_elements_context *context = user_data;
+
+    g_variant_unref(context->elements);
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_entry_save_elements_finish(entry, result, &error);
+
+    if (error == NULL)
+    {
+        g_dbus_method_invocation_return_value(context->invocation, response);
+    }
+    else
+    {
+        g_dbus_method_invocation_return_gerror(context->invocation, error);
+        g_error_free(error);
+    }
+
+    free(context);
+}
+
 static void entry_object_dbus_method_call(GDBusConnection *connection,
                         const gchar *caller,
                         const gchar *object_path,
@@ -582,22 +612,28 @@ static void entry_object_dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp(method_name, "SaveElements") == 0)
     {
-        GVariant *elements = g_variant_get_child_value(parameters, 0);
+        GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
+        GUnixFDList *fd_list = g_dbus_message_get_unix_fd_list(msg);
+
+        struct entry_object_save_elements_context *context = xmalloc(sizeof(*context));
+
+        context->invocation = g_object_ref(invocation);
+        context->elements = g_variant_get_child_value(parameters, 0);
 
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
-
-        GDBusMessage *msg = g_dbus_method_invocation_get_message(invocation);
-        GUnixFDList *in_fd_list = g_dbus_message_get_unix_fd_list(msg);
 
         ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_ON_STACK(limits,
                     abrt_p2_service_elements_limit(service, caller_uid),
                     abrt_p2_service_data_size_limit(service, caller_uid));
 
-        response = abrt_p2_entry_save_elements(entry, flags, elements,
-                                    in_fd_list, caller_uid, &limits, &error);
+        GCancellable *cancellable = g_cancellable_new();
 
-        g_variant_unref(elements);
+        abrt_p2_entry_save_elements_async(entry, flags, context->elements, fd_list,
+                    caller_uid, &limits,
+                    cancellable, entry_object_save_elements_cb, context);
+
+        return;
     }
     else if (strcmp(method_name, "DeleteElements") == 0)
     {
