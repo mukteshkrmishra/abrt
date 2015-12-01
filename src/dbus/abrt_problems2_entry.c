@@ -529,6 +529,21 @@ int abrt_p2_entry_save_elements_in_dump_dir(struct dump_dir *dd, gint32 flags,
             const off_t max_size = base_size > limits->data_size
                                     ? item_stat.st_size
                                     : limits->data_size - base_size;
+
+            if (fcntl(fd, F_SETFL, O_NONBLOCK) < 0)
+            {
+                perror_msg("Failed to set file descriptor of %s non-blocking:", name);
+                close(fd);
+                if (flags & ABRT_P2_ENTRY_IO_ERROR_FATAL)
+                {
+                    g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                            "Failed to set file file descriptor of %s non-blocking", name);
+                    retval = -EIO;
+                    goto exit_loop_on_error;
+                }
+                continue;
+            }
+
             const off_t r = dd_copy_fd(dd, name, fd, /*copy_flags*/0, max_size);
             close(fd);
 

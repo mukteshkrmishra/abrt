@@ -107,8 +107,8 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
             description = {"analyzer"    : "problems2testsuite_analyzer",
                            "reason"      : "Application has been killed",
                            "backtrace"   : "die()",
-                           "duphash"     : "FAKE_BINARY_TYPE",
-                           "uuid"        : "FAKE_BINARY_TYPE",
+                           "duphash"     : "NEW_PROBLEM_DATA_SIZE",
+                           "uuid"        : "NEW_PROBLEM_DATA_SIZE",
                            "huge_file"   : dbus.types.UnixFd(huge_file),
                            "executable"  : "/usr/bin/foo",
                            "type"        : "abrt-problems2-sanity"}
@@ -121,8 +121,8 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
             description = {"analyzer"    : "problems2testsuite_analyzer",
                            "reason"      : "Application has been killed",
                            "backtrace"   : "die()",
-                           "duphash"     : "FAKE_BINARY_TYPE",
-                           "uuid"        : "FAKE_BINARY_TYPE",
+                           "duphash"     : "NOT_READABLE_FD",
+                           "uuid"        : "NOT_READABLE_FD",
                            "passwd"      : dbus.types.UnixFd(fd),
                            "executable"  : "/usr/bin/foo",
                            "type"        : "abrt-problems2-sanity"}
@@ -130,7 +130,36 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
             self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to create new problem directory: Failed to save data of passed file descriptor",
                    self.p2.NewProblem, description, 0)
 
+    def test_pipes(self):
+        rp, wp = os.pipe()
+        try:
+            description = {"analyzer"    : "problems2testsuite_analyzer",
+                           "reason"      : "Application has been killed",
+                           "backtrace"   : "die()",
+                           "duphash"     : "NON_BLOCKING_OPERATIONS",
+                           "uuid"        : "NON_BLOCKING_OPERATIONS",
+                           "pipe"        : dbus.types.UnixFd(rp),
+                           "executable"  : "/usr/bin/foo",
+                           "type"        : "abrt-problems2-sanity"}
 
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to create new problem directory: Failed to save data of passed file descriptor",
+                   self.p2.NewProblem, description, 0)
+
+            os.write(wp, b"Epic success!")
+            os.close(wp)
+            wp = -1
+
+            self.p2_entry_path = self.p2.NewProblem(description, 0)
+            entry = Problems2Entry(self.bus, self.p2_entry_path)
+
+            data = entry.ReadElements(["pipe"], 0x0)
+
+            self.assertIn("pipe", data)
+            self.assertEqual(data["pipe"], "Epic success!");
+        finally:
+            os.close(rp)
+            if wp != -1:
+                os.close(wp)
 
 
 if __name__ == "__main__":

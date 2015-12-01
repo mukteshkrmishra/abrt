@@ -113,7 +113,7 @@ class TestSaveElements(abrt_p2_testing.TestCase):
                 entry.SaveElements(ed, 0)
                 overwrites = True
             except dbus.exceptions.DBusException as ex:
-                self.assertEquals("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements", str(ex))
+                self.assertEqual("org.freedesktop.DBus.Error.LimitsExceeded: Too many elements", str(ex))
                 break
 
         self.assertTrue(overwrites, "SaveElements allows to overwrite element despite Elements count limit")
@@ -146,6 +146,30 @@ class TestSaveElements(abrt_p2_testing.TestCase):
             entry.SaveElements({"passwd": dbus.types.UnixFd(fd)}, 0)
             data = entry.ReadElements(["passwd"], 0x0)
             self.assertNotIn("passwd", data)
+
+    def test_pipes(self):
+        entry = Problems2Entry(self.bus, self.p2_entry_path)
+
+        rp, wp = os.pipe()
+        try:
+            entry.SaveElements({"pipe0" : dbus.types.UnixFd(rp)}, 0)
+            data = entry.ReadElements(["pipe0"], 0x0)
+
+            self.assertNotIn("pipe0", data)
+
+            os.write(wp, b"Epic success!")
+            os.close(wp)
+            wp = -1
+
+            entry.SaveElements({"pipe1" : dbus.types.UnixFd(rp)}, 0)
+            data = entry.ReadElements(["pipe1"], 0x0)
+
+            self.assertIn("pipe1", data)
+            self.assertEqual(data["pipe1"], "Epic success!");
+        finally:
+            os.close(rp)
+            if wp != -1:
+                os.close(wp)
 
 
 if __name__ == "__main__":

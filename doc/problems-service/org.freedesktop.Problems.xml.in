@@ -87,7 +87,7 @@
                             </varlistentry>
                         </variablelist>
 
-                        The value can be one of the following types: string (s), binary array (ay) or file Handle (h).
+                        The value can be one of the following types: string (s), binary array (ay) or file handle (h - will be read in non-blocking mode).
                     </tp:docstring>
                 </arg>
 
@@ -760,7 +760,7 @@ for prblmprx in problems.GetProblems():
                         </varlistentry>
                         <varlistentry>
                             <term>h</term>
-                            <listitem><para>file descriptor</para></listitem>
+                            <listitem><para>file descriptor - will be read in non-blocking mode</para></listitem>
                         </varlistentry>
                     </variablelist>
                    </tp:docstring>
