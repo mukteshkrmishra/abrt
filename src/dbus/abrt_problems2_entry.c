@@ -170,6 +170,9 @@ struct dump_dir *abrt_p2_entry_open_dump_dir(AbrtP2Entry *entry,
     return dd;
 }
 
+/**
+ * Read elements
+ */
 GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
              GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
              GError **error)
@@ -278,6 +281,69 @@ GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
     GVariant *retval_body[1];
     retval_body[0] = g_variant_builder_end(&builder);
     return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
+}
+
+/**
+ * Asynchronous version of Read elements
+ */
+typedef struct
+{
+    gint32 flags;
+    GVariant *elements;
+    GUnixFDList *fd_list;
+    uid_t caller_uid;
+} AbrtP2EntryReadElementsData;
+
+#define abrt_p2_entry_read_elements_data_new() \
+    xmalloc(sizeof(AbrtP2EntryReadElementsData))
+
+static inline void abrt_p2_entry_read_elements_data_free(AbrtP2EntryReadElementsData *data)
+{
+    free(data);
+}
+
+void abrt_p2_entry_read_elements_async_task(GTask *task,
+            gpointer source_object, gpointer task_data,
+            GCancellable *cancellable)
+{
+    AbrtP2Entry *entry = source_object;
+    AbrtP2EntryReadElementsData *data = task_data;
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_entry_read_elements(entry, data->flags,
+            data->elements, data->fd_list, data->caller_uid, &error);
+
+    if (error == NULL)
+        g_task_return_pointer(task, response, (GDestroyNotify)g_variant_unref);
+    else
+        g_task_return_error(task, error);
+}
+
+void abrt_p2_entry_read_elements_async(AbrtP2Entry *entry, gint32 flags,
+             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+             GCancellable *cancellable, GAsyncReadyCallback callback,
+             gpointer user_data)
+{
+    AbrtP2EntryReadElementsData *data = abrt_p2_entry_read_elements_data_new();
+    data->flags = flags;
+    data->elements = elements;
+    data->fd_list = fd_list;
+    data->caller_uid = caller_uid;
+
+    GTask *task = g_task_new(entry, cancellable, callback, user_data);
+    g_task_set_task_data(task, data, (GDestroyNotify)abrt_p2_entry_read_elements_data_free);
+    g_task_run_in_thread(task, abrt_p2_entry_read_elements_async_task);
+    g_object_unref(task);
+    return;
+}
+
+GVariant *abrt_p2_entry_read_elements_finish(AbrtP2Entry *entry,
+            GAsyncResult *result, GError **error)
+{
+    g_return_val_if_fail(g_task_is_valid(result, entry), NULL);
+
+    return g_task_propagate_pointer(G_TASK(result), error);
+
 }
 
 /**

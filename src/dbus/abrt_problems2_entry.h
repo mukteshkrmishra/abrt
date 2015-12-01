@@ -61,6 +61,14 @@ GVariant *abrt_p2_entry_read_elements(AbrtP2Entry *entry, gint32 flags,
              GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
              GError **error);
 
+void abrt_p2_entry_read_elements_async(AbrtP2Entry *entry, gint32 flags,
+             GVariant *elements, GUnixFDList *fd_list, uid_t caller_uid,
+             GCancellable *cancellable, GAsyncReadyCallback callback,
+             gpointer user_data);
+
+GVariant *abrt_p2_entry_read_elements_finish(AbrtP2Entry *entry,
+            GAsyncResult *result, GError **error);
+
 /*
  * Save elements
  */

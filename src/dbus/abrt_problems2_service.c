@@ -564,6 +564,40 @@ static void entry_object_save_elements_cb(GObject *source_object,
     free(context);
 }
 
+struct entry_object_read_elements_context
+{
+    GDBusMethodInvocation *invocation;
+    GVariant *elements;
+    GUnixFDList *out_fd_list;
+};
+
+static void entry_object_read_elements_cb(GObject *source_object,
+            GAsyncResult *result, gpointer user_data)
+{
+    AbrtP2Entry *entry = ABRT_P2_ENTRY(source_object);
+    struct entry_object_read_elements_context *context = user_data;
+
+    g_variant_unref(context->elements);
+
+    GError *error = NULL;
+    GVariant *response = abrt_p2_entry_read_elements_finish(entry, result, &error);
+
+    if (error == NULL)
+    {
+        g_dbus_method_invocation_return_value_with_unix_fd_list(context->invocation,
+                                                                response,
+                                                                context->out_fd_list);
+    }
+    else
+    {
+        g_dbus_method_invocation_return_gerror(context->invocation, error);
+        g_error_free(error);
+    }
+
+    g_object_unref(context->out_fd_list);
+    free(context);
+}
+
 static void entry_object_dbus_method_call(GDBusConnection *connection,
                         const gchar *caller,
                         const gchar *object_path,
@@ -587,7 +621,6 @@ static void entry_object_dbus_method_call(GDBusConnection *connection,
     }
 
     GVariant *response = NULL;
-    GUnixFDList *out_fd_list = NULL;
     AbrtP2Entry *entry = abrt_p2_object_get_node(user_data);
     if (strcmp(method_name, "GetSemanticElement") == 0)
     {
@@ -599,16 +632,21 @@ static void entry_object_dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp(method_name, "ReadElements") == 0)
     {
-        GVariant *elements = g_variant_get_child_value(parameters, 0);
+        struct entry_object_read_elements_context *context = xmalloc(sizeof(*context));
+        context->invocation = g_object_ref(invocation);
+        context->elements = g_variant_get_child_value(parameters, 0);
+        context->out_fd_list = g_unix_fd_list_new();
 
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        out_fd_list = g_unix_fd_list_new();
-        response = abrt_p2_entry_read_elements(entry, flags, elements,
-                                               out_fd_list, caller_uid, &error);
+        GCancellable *cancellable = g_cancellable_new();
 
-        g_variant_unref(elements);
+        abrt_p2_entry_read_elements_async(entry, flags, context->elements,
+                   context->out_fd_list, caller_uid,
+                   cancellable, entry_object_read_elements_cb, context);
+
+        return;
     }
     else if (strcmp(method_name, "SaveElements") == 0)
     {
@@ -655,13 +693,6 @@ static void entry_object_dbus_method_call(GDBusConnection *connection,
     {
         g_dbus_method_invocation_return_gerror(invocation, error);
         g_error_free(error);
-    }
-    else if (out_fd_list != NULL)
-    {
-        g_dbus_method_invocation_return_value_with_unix_fd_list(invocation,
-                                                                response,
-                                                                out_fd_list);
-        g_object_unref(out_fd_list);
     }
     else
         g_dbus_method_invocation_return_value(invocation, response);
