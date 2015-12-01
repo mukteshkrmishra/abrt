@@ -194,14 +194,18 @@ class TestCase(unittest.TestCase):
         self.signals = []
         self.crash_signal_occurrences = []
 
-    def _main_loop_start(self):
+    def main_loop_start(self,timeout=10000):
         self.loop_counter += 1
         if self.loop_running:
             return
 
         self.loop_running = True
-        self.tm = GLib.timeout_add(10000, self.interrupt_waiting)
+        self.tm = GLib.timeout_add(timeout, self._kill_loop)
         self.loop.run()
+
+    def _kill_loop(self):
+        printf("Loop interrupted on timeout")
+        self.interrupt_waiting(emergency=True)
 
     def interrupt_waiting(self, emergency=True):
         self.loop_counter -= 1
@@ -234,7 +238,7 @@ class TestCase(unittest.TestCase):
     def wait_for_signals(self, signals):
         self.signals = signals
         logging.debug("Waiting for signals %s" % (", ".join(signals)))
-        self._main_loop_start()
+        self.main_loop_start()
 
     def assertRaisesDBusError(self, error_msg, cb, *args):
         self.assertRaisesRegexp(dbus.exceptions.DBusException, error_msg,
