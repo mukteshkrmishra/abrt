@@ -697,3 +697,21 @@ GVariant *abrt_p2_entry_delete_elements(AbrtP2Entry *entry, uid_t caller_uid,
 
     return NULL;
 }
+
+/*
+ * Properties
+ */
+uid_t abrt_p2_entry_get_owner(AbrtP2Entry *entry, GError **error)
+{
+    struct dump_dir *dd = dd_opendir(entry->pv->p2e_dirname, DD_OPEN_FD_ONLY);
+    if (dd == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_IO_ERROR,
+                    "Failed open dump directory");
+        return -1;
+    }
+
+    uid_t uid = dd_get_owner(dd);
+    dd_close(dd);
+    return uid;
+}

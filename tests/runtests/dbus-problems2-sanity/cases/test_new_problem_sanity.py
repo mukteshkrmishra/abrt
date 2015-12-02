@@ -127,7 +127,7 @@ class TestNewProblemSanity(abrt_p2_testing.TestCase):
                            "executable"  : "/usr/bin/foo",
                            "type"        : "abrt-problems2-sanity"}
 
-            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to create new problem directory: Failed to save data of passed file descriptor",
+            self.assertRaisesDBusError("org.freedesktop.DBus.Error.IOError: Failed to create new problem directory: Failed to set file file descriptor of passwd non-blocking",
                    self.p2.NewProblem, description, 0)
 
     def test_pipes(self):

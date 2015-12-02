@@ -1032,12 +1032,17 @@ static void entry_object_destructor(struct abrt_p2_object *obj)
     g_object_unref(entry);
 }
 
-static const char *entry_object_register_dump_dir(AbrtP2Service *service,
-            const char *dd_dirname, GError **error)
+static char *entry_object_dir_name_to_path(const char *dd_dirname)
 {
     char hash_str[SHA1_RESULT_LEN*2 + 1];
     str_to_sha1str(hash_str, dd_dirname);
-    char *path = xasprintf(ABRT_P2_PATH"/Entry/%s", hash_str);
+    return xasprintf(ABRT_P2_PATH"/Entry/%s", hash_str);
+}
+
+static struct abrt_p2_object *entry_object_register_dump_dir(AbrtP2Service *service,
+            const char *dd_dirname, GError **error)
+{
+    char *path = entry_object_dir_name_to_path(dd_dirname);
 
     char *const dup_dirname = xstrdup(dd_dirname);
     AbrtP2Entry *entry = abrt_p2_entry_new(dup_dirname);
@@ -1072,7 +1077,7 @@ static const char *entry_object_register_dump_dir(AbrtP2Service *service,
 
     user->problems++;
 
-    return path;
+    return obj;
 }
 
 struct entry_object_save_problem_args
@@ -1096,11 +1101,11 @@ static int entry_object_wrapped_abrt_p2_entry_save_elements(struct dump_dir *dd,
                                        args->error);
 }
 
-const char *abrt_p2_service_save_problem(
+char *abrt_p2_service_save_problem(
         AbrtP2Service *service,
         const char *type_str,
         GVariant *problem_info, GUnixFDList *fd_list,
-        uid_t caller_uid, char **problem_id, GError **error)
+        uid_t caller_uid, GError **error)
 {
     struct entry_object_save_problem_args args = {
         .problem_info = problem_info,
@@ -1125,24 +1130,10 @@ const char *abrt_p2_service_save_problem(
         return NULL;
     }
 
-    const char *entry_node_path = entry_object_register_dump_dir(service,
-                                                               dd->dd_dirname,
-                                                               error);
-
-    if (entry_node_path != NULL)
-    {
-        if (problem_id != NULL)
-            *problem_id = xstrdup(dd->dd_dirname);
-
-        /* TODO: wait for results from abrtd */
-        uid_t uid = dd_get_owner(dd);
-        GVariant *parameters = g_variant_new("(oi)", entry_node_path, (gint32)uid);
-        abrt_p2_object_emit_signal(service->pv->p2srv_p2_object, "Crash", parameters);
-    }
-
+    char *retval = xstrdup(dd->dd_dirname);
     dd_close(dd);
 
-    return entry_node_path;
+    return retval;
 }
 
 int abrt_p2_service_remove_problem(AbrtP2Service *service,
@@ -1336,14 +1327,40 @@ GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
 
     GVariant *real_problem_info = g_variant_dict_end(&pd);
 
-    new_path = abrt_p2_service_save_problem(service, type_str, real_problem_info, fd_list, caller_uid, &problem_id, error);
+    problem_id = abrt_p2_service_save_problem(service, type_str, real_problem_info, fd_list, caller_uid, error);
 
     g_variant_unref(real_problem_info);
     free(type_str);
     free(analyzer_str);
 
     if (problem_id)
-        notify_new_path(problem_id);
+    {
+        char *message = NULL;
+        int r = notify_new_path_with_reponse(problem_id, &message);
+
+        log_debug("New path processed: %u", r);
+        if (message != NULL && r == 303)
+        {
+            new_path = entry_object_dir_name_to_path(message);
+            log_debug("New occurrence of '%s'", new_path);
+        }
+        else
+        {
+            struct abrt_p2_object *obj = entry_object_register_dump_dir(service, problem_id, error);
+            if (obj != NULL)
+            {
+                new_path = obj->path;
+                log_debug("New problem '%s'", new_path);
+                AbrtP2Entry *entry = abrt_p2_object_get_node(obj);
+                uid_t uid = abrt_p2_entry_get_owner(entry, error);
+                if (uid >= 0)
+                {
+                    GVariant *parameters = g_variant_new("(oi)", new_path, (gint32)uid);
+                    abrt_p2_object_emit_signal(service->pv->p2srv_p2_object, "Crash", parameters);
+                }
+            }
+        }
+    }
 
     free(problem_id);
 

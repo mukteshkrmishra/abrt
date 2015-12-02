@@ -45,6 +45,11 @@ GVariant *abrt_p2_entry_delete_elements(AbrtP2Entry *entry, uid_t caller_uid,
             GVariant *elements, GError **error);
 
 /*
+ * Properties
+ */
+uid_t abrt_p2_entry_get_owner(AbrtP2Entry *entry, GError **error);
+
+/*
  * Read elements
  */
 enum AbrtP2EntryReadElementsFlags

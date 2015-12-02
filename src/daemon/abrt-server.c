@@ -155,19 +155,33 @@ static pid_t spawn_event_handler_child(const char *dump_dir_name, const char *ev
     return child;
 }
 
-static int run_post_create(const char *dirname)
+struct response
+{
+    int code;
+    char *message;
+};
+
+#define RESPONSE_SETTER(r, c, m) \
+    do { if (r != NULL) { r->message = m; r->code = c; } else { free(m); }} while (0)
+
+#define RESPONSE_RETURN(r, c ,m) \
+    do { RESPONSE_SETTER(r, c, m); \
+         return c; } while (0)
+
+
+static int run_post_create(const char *dirname, struct response *resp)
 {
     /* If doesn't start with "g_settings_dump_location/"... */
     if (!dir_is_in_dump_location(dirname))
     {
         /* Then refuse to operate on it (someone is attacking us??) */
         error_msg("Bad problem directory name '%s', should start with: '%s'", dirname, g_settings_dump_location);
-        return 400; /* Bad Request */
+        RESPONSE_RETURN(resp, 400, NULL);
     }
     if (!dir_has_correct_permissions(dirname, DD_PERM_EVENTS))
     {
         error_msg("Problem directory '%s' has wrong owner or group", dirname);
-        return 400; /*  */
+        RESPONSE_RETURN(resp, 400, NULL);
     }
     /* Check completness */
     {
@@ -177,7 +191,7 @@ static int run_post_create(const char *dirname)
         if (complete)
         {
             error_msg("Problem directory '%s' has already been processed", dirname);
-            return 403;
+            RESPONSE_RETURN(resp, 403, NULL);
         }
     }
 
@@ -324,13 +338,17 @@ static int run_post_create(const char *dirname)
     dd_close(dd);
 
     if (!dup_of_dir)
+    {
         log_notice("New problem directory %s, processing", work_dir);
+        RESPONSE_SETTER(resp, 200, NULL);
+    }
     else
     {
         log_warning("Deleting problem directory %s (dup of %s)",
                     strrchr(dirname, '/') + 1,
                     strrchr(dup_of_dir, '/') + 1);
         delete_dump_dir(dirname);
+        RESPONSE_SETTER(resp, 303, dup_of_dir);
     }
 
     /* Run "notify[-dup]" event */
@@ -343,14 +361,14 @@ static int run_post_create(const char *dirname)
     //log("Started notify, fd %d -> %d", fd, child_stdout_fd);
     xmove_fd(fd, child_stdout_fd);
     child_is_post_create = 0;
-    strbuf_clear(cmd_output);
-    free(dup_of_dir);
     dup_of_dir = NULL;
+    strbuf_clear(cmd_output);
     goto read_child_output;
 
  delete_bad_dir:
     log_warning("Deleting problem directory '%s'", dirname);
     delete_dump_dir(dirname);
+    RESPONSE_SETTER(resp, 403, NULL);
 
  ret:
     strbuf_free(cmd_output);
@@ -456,7 +474,7 @@ static int create_problem_dir(GHashTable *problem_info, unsigned pid)
         trim_problem_dirs(g_settings_dump_location, g_settings_nMaxCrashReportsSize * (double)(1024*1024), path);
     }
 
-    run_post_create(path);
+    run_post_create(path, NULL);
 
     /* free(path); */
     exit(0);
@@ -581,7 +599,7 @@ unsigned convert_pid(GHashTable *problem_info)
     return (unsigned) ret;
 }
 
-static int perform_http_xact(void)
+static int perform_http_xact(struct response *rsp)
 {
     /* use free instead of g_free so that we can use xstr* functions from
      * libreport/lib/xfuncs.c
@@ -743,7 +761,7 @@ static int perform_http_xact(void)
         }
 
         messagebuf_data[messagebuf_len] = '\0';
-        return run_post_create(messagebuf_data);
+        return run_post_create(messagebuf_data, rsp);
     }
 
     /* Save problem dir */
@@ -842,13 +860,23 @@ int main(int argc, char **argv)
 
     load_abrt_conf();
 
-    int r = perform_http_xact();
+    struct response rsp = { 0 };
+    int r = perform_http_xact(&rsp);
     if (r == 0)
         r = 200;
 
+    if (rsp.code == 0)
+        rsp.code = r;
+
     free_abrt_conf_data();
 
-    printf("HTTP/1.1 %u \r\n\r\n", r);
+    printf("HTTP/1.1 %u \r\n\r\n", rsp.code);
+    if (rsp.message != NULL)
+    {
+        printf("%s", rsp.message);
+        fflush(stdout);
+        free(rsp.message);
+    }
 
     return (r >= 400); /* Error if 400+ */
 }
