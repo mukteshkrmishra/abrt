@@ -1101,95 +1101,6 @@ static int entry_object_wrapped_abrt_p2_entry_save_elements(struct dump_dir *dd,
                                        args->error);
 }
 
-char *abrt_p2_service_save_problem(
-        AbrtP2Service *service,
-        const char *type_str,
-        GVariant *problem_info, GUnixFDList *fd_list,
-        uid_t caller_uid, GError **error)
-{
-    struct entry_object_save_problem_args args = {
-        .problem_info = problem_info,
-        .fd_list = fd_list,
-        .caller_uid = caller_uid,
-        .error = error,
-    };
-
-    ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_INITIALIZER(args.limits,
-                        abrt_p2_service_elements_limit(service, caller_uid),
-                        abrt_p2_service_data_size_limit(service, caller_uid));
-
-    struct dump_dir *dd = create_dump_dir(g_settings_dump_location,
-                                          type_str,
-                                          /*fs owner*/0,
-                                          (save_data_call_back)entry_object_wrapped_abrt_p2_entry_save_elements,
-                                          (void *)&args);
-
-    if (dd == NULL)
-    {
-        g_prefix_error(error, "Failed to create new problem directory: ");
-        return NULL;
-    }
-
-    char *retval = xstrdup(dd->dd_dirname);
-    dd_close(dd);
-
-    return retval;
-}
-
-int abrt_p2_service_remove_problem(AbrtP2Service *service,
-            const char *entry_path, uid_t caller_uid, GError **error)
-{
-    struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
-    if (obj == NULL)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
-                "Requested Entry does not exist");
-        return -ENOENT;
-    }
-
-    const int ret = abrt_p2_entry_delete(ABRT_P2_ENTRY(obj->node), caller_uid, error);
-    if (ret != 0)
-        return ret;
-
-    abrt_p2_object_destroy(obj);
-    return 0;
-}
-
-GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
-            const char *entry_path, uid_t caller_uid, GError **error)
-{
-    struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
-    if (obj == NULL)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
-                "Requested Entry does not exist");
-        return NULL;
-    }
-
-    return abrt_p2_entry_problem_data(ABRT_P2_ENTRY(obj->node), caller_uid, error);
-}
-
-GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
-{
-    GList *paths = NULL;
-
-    GHashTableIter iter;
-    g_hash_table_iter_init(&iter, service->pv->p2srv_p2_entry_type.objects);
-
-    const char *p;
-    struct abrt_p2_object *obj;
-    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
-    {
-        if (0 == abrt_p2_entry_accessible_by_uid(ABRT_P2_ENTRY(obj->node), uid, NULL))
-            paths = g_list_prepend(paths, (gpointer)p);
-    }
-
-    return paths;
-}
-
-/*
- * /org/freedesktop/Problems2
- */
 static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
 {
     gchar *name = NULL;
@@ -1205,33 +1116,10 @@ static GList *abrt_g_variant_get_dict_keys(GVariant *dict)
     return retval;
 }
 
-GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
-                   GVariant *problem_info, gint32 flags, uid_t caller_uid,
-                   GUnixFDList *fd_list, GError **error)
+char *abrt_p2_service_save_problem( AbrtP2Service *service,
+        GVariant *problem_info, GUnixFDList *fd_list, uid_t caller_uid,
+        GError **error)
 {
-    int r = abrt_p2_service_user_can_create_new_problem(service, caller_uid);
-    if (r == 0)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
-                    "Too many problems have been recently created");
-        return NULL;
-    }
-    if (r == -E2BIG)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
-                    "No more problems can be created");
-        return NULL;
-    }
-    if (r < 0)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                    "Failed to check NewProblem limits");
-        return NULL;
-    }
-
-    char *problem_id = NULL;
-    const char *new_path = NULL;
-
     GVariantDict pd;
     g_variant_dict_init(&pd, problem_info);
 
@@ -1325,13 +1213,122 @@ GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
     if (uid_element != NULL)
         g_variant_unref(uid_element);
 
-    GVariant *real_problem_info = g_variant_dict_end(&pd);
+    struct entry_object_save_problem_args args = {
+        .problem_info = g_variant_dict_end(&pd),
+        .fd_list = fd_list,
+        .caller_uid = caller_uid,
+        .error = error,
+    };
 
-    problem_id = abrt_p2_service_save_problem(service, type_str, real_problem_info, fd_list, caller_uid, error);
+    ABRT_P2_ENTRY_SAVE_ELEMENTS_LIMITS_INITIALIZER(args.limits,
+                        abrt_p2_service_elements_limit(service, caller_uid),
+                        abrt_p2_service_data_size_limit(service, caller_uid));
 
-    g_variant_unref(real_problem_info);
+    struct dump_dir *dd = create_dump_dir(g_settings_dump_location,
+                                          type_str,
+                                          /*fs owner*/0,
+                                          (save_data_call_back)entry_object_wrapped_abrt_p2_entry_save_elements,
+                                          (void *)&args);
+
+    g_variant_unref(args.problem_info);
     free(type_str);
     free(analyzer_str);
+
+    if (dd == NULL)
+    {
+        g_prefix_error(error, "Failed to create new problem directory: ");
+        return NULL;
+    }
+
+    char *retval = xstrdup(dd->dd_dirname);
+    dd_close(dd);
+
+    return retval;
+}
+
+int abrt_p2_service_remove_problem(AbrtP2Service *service,
+            const char *entry_path, uid_t caller_uid, GError **error)
+{
+    struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
+    if (obj == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
+                "Requested Entry does not exist");
+        return -ENOENT;
+    }
+
+    const int ret = abrt_p2_entry_delete(ABRT_P2_ENTRY(obj->node), caller_uid, error);
+    if (ret != 0)
+        return ret;
+
+    abrt_p2_object_destroy(obj);
+    return 0;
+}
+
+GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
+            const char *entry_path, uid_t caller_uid, GError **error)
+{
+    struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
+    if (obj == NULL)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
+                "Requested Entry does not exist");
+        return NULL;
+    }
+
+    return abrt_p2_entry_problem_data(ABRT_P2_ENTRY(obj->node), caller_uid, error);
+}
+
+GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
+{
+    GList *paths = NULL;
+
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, service->pv->p2srv_p2_entry_type.objects);
+
+    const char *p;
+    struct abrt_p2_object *obj;
+    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
+    {
+        if (0 == abrt_p2_entry_accessible_by_uid(ABRT_P2_ENTRY(obj->node), uid, NULL))
+            paths = g_list_prepend(paths, (gpointer)p);
+    }
+
+    return paths;
+}
+
+/*
+ * /org/freedesktop/Problems2
+ */
+GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
+                   GVariant *problem_info, gint32 flags, uid_t caller_uid,
+                   GUnixFDList *fd_list, GError **error)
+{
+    int r = abrt_p2_service_user_can_create_new_problem(service, caller_uid);
+    if (r == 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                    "Too many problems have been recently created");
+        return NULL;
+    }
+    if (r == -E2BIG)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
+                    "No more problems can be created");
+        return NULL;
+    }
+    if (r < 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Failed to check NewProblem limits");
+        return NULL;
+    }
+
+    char *problem_id = NULL;
+    const char *new_path = NULL;
+
+    problem_id = abrt_p2_service_save_problem(service, problem_info, fd_list,
+                                              caller_uid, error);
 
     if (problem_id)
     {

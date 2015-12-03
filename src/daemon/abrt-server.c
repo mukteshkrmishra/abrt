@@ -368,6 +368,7 @@ static int run_post_create(const char *dirname, struct response *resp)
  delete_bad_dir:
     log_warning("Deleting problem directory '%s'", dirname);
     delete_dump_dir(dirname);
+    /* TODO - better code to allow detection on client's side */
     RESPONSE_SETTER(resp, 403, NULL);
 
  ret:

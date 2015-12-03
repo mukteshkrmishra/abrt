@@ -88,15 +88,32 @@
                         </variablelist>
 
                         The value can be one of the following types: string (s), binary array (ay) or file handle (h - will be read in non-blocking mode).
+
+                        The task details will contain object path of a temporary Entry under the key "NewProblem.TemporaryEntry". The temporary entry object implements the org.freedesktop.Problems2.Entry interface. The task results witll contain object path of the Entry representing the processed problem data under the key "NewProblem.Entry".
                     </tp:docstring>
                 </arg>
 
                 <arg type='i' name='flags' direction='in'>
-                    <tp:docstring>For future needs</tp:docstring>
+                    <tp:docstring>
+                        <variablelist>
+                            <varlistentry>
+                                <term>0</term>
+                                <listitem><para>Process the problem data without creating a task.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1</term>
+                                <listitem><para>Create a task and immediately start its process.</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>2</term>
+                                <listitem><para>Create a task and postponse its processing.</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                    </tp:docstring>
                 </arg>
 
-                <arg type='o' name='entry' direction='out'>
-                    <tp:docstring>Object path of the new problem</tp:docstring>
+                <arg type='o' name='task' direction='out'>
+                    <tp:docstring>Object path of the task processing the new problem data.</tp:docstring>
                 </arg>
 
                 <tp:docstring>
@@ -104,16 +121,29 @@
                         <title>How to create a new problems in Python</title>
                         <programlisting>
 <![CDATA[
-#!/usr/bin/env python
+#!/usr/bin/python3
+import os
 import dbus
+from dbus.mainloop.glib import DBusGMainLoop
 
 bus = dbus.SystemBus()
 
-proxy = bus.get_object("org.freedesktop.problems",
-                                  '/org/freedesktop/problems2')
+def on_task_properties_changed(iface, changed_properties, invalidated_properties, tp=None):
+    if changed_properties['status'] == 2:
+        p = bus.get_object("org.freedesktop.problems", tp)
+        t = dbus.Interface(p, dbus_interface("org.freedesktop.Problems2.Task"))
+        results, code = t.Finish()
+        if code == 0:
+            print(results["NewProblem.Entry"])
+            os.exit(0)
+        else:
+            print(results["Error.Message"])
+            os.exit(1)
 
+proxy = bus.get_object("org.freedesktop.problems", '/org/freedesktop/problems2')
 problems = dbus.Interface(proxy, dbus_interface='org.freedesktop.Problems2')
 
+task_pah = None
 with open("/etc/services", "r") as services_file:
     description = {"analyzer"    : "libreport",
                    "reason"      : "Application has been killed",
@@ -121,7 +151,24 @@ with open("/etc/services", "r") as services_file:
                    "executable"  : "/usr/bin/foo",
                    "services"    : dbus.types.UnixFd(services_file)}
 
-    problem_path = problems.NewProblem(description, 0)
+    task_path = problems.NewProblem(description, 1)
+
+task_proxy = dbus.get_object("org.freedesktop.problems", task_path)
+task_properties = dbus.Interface(task_proxy, dbus_interface='org.freedesktop.DBus.Properties')
+task_properties.connect_to_signal("PropertiesChanged", on_task_properties_changed, path_keyword="tp")
+
+DBusGMainLoop(set_as_default=True)
+loop = GLib.MainLoop()
+GLib.timeout_add(30000, loop.quit)
+loop.run()
+
+print("Failed")
+
+task = dbus.Interface(task_proxy, dbus_interface='org.freedesktop.Problems2.Task')
+task.Cancel(0)
+
+os.exit(1)
+
 ]]>
                         </programlisting>
                     </example>
@@ -882,6 +929,77 @@ for prblmprx in problems.GetProblems():
                     </tp:docstring>
                 </arg>
             </signal>
+        </interface>
+
+    </node>
+
+    <node name='/org/freedesktop/Problems2/Task/xxx'>
+
+        <interface name='org.freedesktop.Problems2.Task'>
+            <tp:docstring>Repsensts an long running task</tp:docstring>
+
+            <method name="Start">
+                <tp:docstring>Request to start processing of the task. This method can be called only if the status property equals TASK_READY.</tp:docstring>
+
+                <arg type='a{sv}' name='configuration' direction='in'>
+                    <tp:docstring>For future needs</tp:docstring>
+                </arg>
+            </method>
+
+            <method name="Cancel">
+                <tp:docstring>Request to cancel processing of the task. The task will be disposed after that. This method can be called only if the status property equals TASK_PROCESSING.</tp:docstring>
+
+                <arg type='i' name='flags' direction='in'>
+                    <tp:docstring>For future needs</tp:docstring>
+                </arg>
+            </method>
+
+            <method name='Finish'>
+                <tp:docstring>Takes the results and dispose the task. The method can be called only if the status property equals TASK_DONE.</tp:docstring>
+
+                <arg type='a{sv}' name='results' direction='out'>
+                    <tp:docstring>The parameter for returning the results.</tp:docstring>
+                </arg>
+
+                <arg type='i' name='code' direction='out'>
+                    <tp:docstring>Return code
+                        <variablelist>
+                            <varlistentry>
+                                <term>0</term>
+                                <listitem><para>Sucessfully finished</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1</term>
+                                <listitem><para>Processing failed</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                    </tp:docstring>
+                </arg>
+            </method>
+
+            <property name='details' type='a{sv}' access='read'>
+                <tp:docstring>Any details that the specific task provides.</tp:docstring>
+            </property>
+
+            <property name='status' type='i' access='read'>
+                <tp:docstring>This property supports org.freedesktop.DBus.Properties.PropertiesChanged singal.
+                        <variablelist>
+                            <varlistentry>
+                                <term>0</term>
+                                <listitem><para>TASK_READY: processing can be started</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>1</term>
+                                <listitem><para>TASK_PROCESSING: processing has been started</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>2</term>
+                                <listitem><para>TASK_DONE: processing has been finished</para></listitem>
+                            </varlistentry>
+                        </variablelist>
+                </tp:docstring>
+            </property>
+
         </interface>
 
     </node>

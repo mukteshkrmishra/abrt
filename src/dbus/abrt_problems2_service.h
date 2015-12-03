@@ -47,11 +47,9 @@ uid_t abrt_p2_service_caller_uid(AbrtP2Service *service,
 uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service,
             const char *caller, GError **error);
 
-char *abrt_p2_service_save_problem(
-            AbrtP2Service *service,
-            const char *type_str,
-            GVariant *problem_info, GUnixFDList *fd_list,
-            uid_t caller_uid, GError **error);
+char *abrt_p2_service_save_problem(AbrtP2Service *service,
+            GVariant *problem_info, GUnixFDList *fd_list, uid_t caller_uid,
+            GError **error);
 
 int abrt_p2_service_remove_problem(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error);
