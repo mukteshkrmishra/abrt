@@ -81,7 +81,8 @@ struct _AbrtP2Session
     GObject parent_instance;
     AbrtP2SessionPrivate *pv;
 
-   void (*authorization_changed)(AbrtP2Session *session, gint32 status);
+    /* TODO: signal should be part of the class */
+    void (*authorization_changed)(AbrtP2Session *session, gint32 status);
 };
 
 G_DEFINE_TYPE_WITH_PRIVATE(AbrtP2Session, abrt_p2_session, G_TYPE_OBJECT)
@@ -116,7 +117,7 @@ static void abrt_p2_session_class_init(AbrtP2SessionClass *klass)
                              G_SIGNAL_RUN_LAST,
                              G_STRUCT_OFFSET(struct _AbrtP2Session, authorization_changed),
                              /*accumulator*/NULL, /*accu_data*/NULL,
-                             g_cclosure_marshal_VOID__VOID,
+                             g_cclosure_marshal_VOID__INT,
                              G_TYPE_NONE,
                              /*n_params*/1,
                              G_TYPE_INT);

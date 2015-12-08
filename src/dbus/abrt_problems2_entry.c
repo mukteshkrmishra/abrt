@@ -24,6 +24,7 @@
 typedef struct
 {
     char *p2e_dirname;
+    AbrtP2EntryState p2e_state;
 } AbrtP2EntryPrivate;
 
 struct _AbrtP2Entry
@@ -53,10 +54,31 @@ static void abrt_p2_entry_init(AbrtP2Entry *self)
 
 AbrtP2Entry *abrt_p2_entry_new(char *dirname)
 {
+    return abrt_p2_entry_new_with_state(dirname, ABRT_P2_ENTRY_STATE_COMPLETE);
+}
+
+AbrtP2Entry *abrt_p2_entry_new_with_state(char *dirname, AbrtP2EntryState state)
+{
     AbrtP2Entry *entry = g_object_new(TYPE_ABRT_P2_ENTRY, NULL);
     entry->pv->p2e_dirname = dirname;
+    entry->pv->p2e_state = state;
 
     return entry;
+}
+
+AbrtP2EntryState abrt_p2_entry_state(AbrtP2Entry *entry)
+{
+    return entry->pv->p2e_state;
+}
+
+void abrt_p2_entry_set_state(AbrtP2Entry *entry, AbrtP2EntryState state)
+{
+    entry->pv->p2e_state = state;
+}
+
+const char *abrt_p2_entry_problem_id(AbrtP2Entry *entry)
+{
+    return entry->pv->p2e_dirname;
 }
 
 int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid, struct dump_dir **dd)
@@ -107,6 +129,8 @@ int abrt_p2_entry_delete(AbrtP2Entry *entry, uid_t caller_uid, GError **error)
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                 "Failed to remove problem data. Check system logs.");
     }
+
+    abrt_p2_entry_set_state(entry, ABRT_P2_ENTRY_STATE_DELETED);
 
     return ret;
 }

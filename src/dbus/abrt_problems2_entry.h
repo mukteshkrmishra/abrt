@@ -30,10 +30,24 @@ G_DECLARE_FINAL_TYPE(AbrtP2Entry, abrt_p2_entry, ABRT_P2, ENTRY, GObject)
 
 AbrtP2Entry *abrt_p2_entry_new(char *dirname);
 
-int  abrt_p2_entry_delete(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
+typedef enum {
+    ABRT_P2_ENTRY_STATE_NEW,
+    ABRT_P2_ENTRY_STATE_COMPLETE,
+    ABRT_P2_ENTRY_STATE_DELETED,
+} AbrtP2EntryState;
+
+AbrtP2Entry *abrt_p2_entry_new_with_state(char *dirname, AbrtP2EntryState state);
+
+AbrtP2EntryState abrt_p2_entry_state(AbrtP2Entry *entry);
+
+void abrt_p2_entry_set_state(AbrtP2Entry *entry, AbrtP2EntryState state);
+
+int abrt_p2_entry_delete(AbrtP2Entry *entry, uid_t caller_uid, GError **error);
 
 int abrt_p2_entry_accessible_by_uid(AbrtP2Entry *entry, uid_t uid,
             struct dump_dir **dd);
+
+const char *abrt_p2_entry_problem_id(AbrtP2Entry *entry);
 
 struct dump_dir *abrt_p2_entry_open_dump_dir(AbrtP2Entry *entry,
              uid_t caller_uid, int dd_flags, GError **error);

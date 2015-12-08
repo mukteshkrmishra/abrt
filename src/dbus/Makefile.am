@@ -37,7 +37,9 @@ libabrt_problems2_service_a_SOURCES = \
     abrt_problems2_entry.c \
     abrt_problems2_entry.h \
     abrt_problems2_task.c \
-    abrt_problems2_task.h
+    abrt_problems2_task.h \
+    abrt_problems2_task_new_problem.c \
+    abrt_problems2_task_new_problem.h
 # Manual dependency
 libabrt_problems2_service_a-abrt_problems2_service.$(OBJEXT): \
     abrt_problems2_generated_interfaces.h

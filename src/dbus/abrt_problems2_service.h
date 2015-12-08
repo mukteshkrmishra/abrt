@@ -29,6 +29,10 @@
 /*
  * Service administration
  */
+struct abrt_p2_object;
+const char *abrt_p2_object_path(struct abrt_p2_object *obj);
+void *abrt_p2_object_get_node(struct abrt_p2_object *obj);
+void abrt_p2_object_destroy(struct abrt_p2_object *obj);
 
 #define TYPE_ABRT_P2_SERVICE abrt_p2_service_get_type ()
 G_DECLARE_FINAL_TYPE(AbrtP2Service, abrt_p2_service, ABRT_P2, SERVICE, GObject)
@@ -58,6 +62,16 @@ GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error);
 
 GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
+
+struct abrt_p2_object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
+            const char *entry_path, GError **error);
+
+struct _AbrtP2Entry;
+struct abrt_p2_object *abrt_p2_service_register_entry(AbrtP2Service *service,
+            struct _AbrtP2Entry *entry, GError **error);
+
+void abrt_p2_service_notify_entry_object(AbrtP2Service *service,
+            struct abrt_p2_object *obj, GError **error);
 
 int abrt_p2_service_user_can_create_new_problem(AbrtP2Service *service,
             uid_t uid);

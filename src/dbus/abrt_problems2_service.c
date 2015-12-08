@@ -23,6 +23,8 @@
 #include <gio/gunixfdlist.h>
 #include "libabrt.h"
 #include "problem_api.h"
+#include "abrt_problems2_task_new_problem.h"
+#include "abrt_problems2_task.h"
 #include "abrt_problems2_generated_interfaces.h"
 #include "abrt_problems2_service.h"
 #include "abrt_problems2_session.h"
@@ -152,7 +154,7 @@ struct abrt_p2_object
     void (*destructor)(struct abrt_p2_object *);
 };
 
-void abrt_p2_object_free(struct abrt_p2_object *obj)
+static void abrt_p2_object_free(struct abrt_p2_object *obj)
 {
     if (obj == NULL)
         return;
@@ -175,7 +177,7 @@ void abrt_p2_object_free(struct abrt_p2_object *obj)
     free(obj);
 }
 
-AbrtP2Service *abrt_p2_object_service(struct abrt_p2_object *object)
+static AbrtP2Service *abrt_p2_object_service(struct abrt_p2_object *object)
 {
     return object->service;
 }
@@ -191,7 +193,7 @@ void abrt_p2_object_destroy(struct abrt_p2_object *object)
     g_dbus_connection_unregister_object(abrt_p2_service_dbus(object->service), object->regid);
 }
 
-void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
+static void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
         const char *member,
         GVariant *parameters)
 {
@@ -216,7 +218,7 @@ void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
     }
 }
 
-struct abrt_p2_object *abrt_p2_object_new(AbrtP2Service *service,
+static struct abrt_p2_object *abrt_p2_object_new(AbrtP2Service *service,
         struct problems2_object_type *type,
         char *path,
         void *node,
@@ -258,6 +260,11 @@ struct abrt_p2_object *abrt_p2_object_new(AbrtP2Service *service,
     g_hash_table_insert(obj->type->objects, path, obj);
 
     return obj;
+}
+
+const char *abrt_p2_object_path(struct abrt_p2_object *obj)
+{
+    return obj->path;
 }
 
 /*
@@ -534,6 +541,19 @@ uid_t abrt_p2_service_caller_real_uid(AbrtP2Service *service, const char *caller
 /*
  * /org/freedesktop/Problems2/Entry/XYZ
  */
+void abrt_p2_service_notify_entry_object(AbrtP2Service *service,
+            struct abrt_p2_object *obj, GError **error)
+{
+    AbrtP2Entry *entry = abrt_p2_object_get_node(obj);
+    uid_t uid = abrt_p2_entry_get_owner(entry, error);
+
+    if (uid >= 0)
+    {
+        GVariant *parameters = g_variant_new("(oi)", obj->path, (gint32)uid);
+        abrt_p2_object_emit_signal(service->pv->p2srv_p2_object, "Crash", parameters);
+    }
+}
+
 struct entry_object_save_elements_context
 {
     GDBusMethodInvocation *invocation;
@@ -1042,10 +1062,17 @@ static char *entry_object_dir_name_to_path(const char *dd_dirname)
 static struct abrt_p2_object *entry_object_register_dump_dir(AbrtP2Service *service,
             const char *dd_dirname, GError **error)
 {
-    char *path = entry_object_dir_name_to_path(dd_dirname);
-
     char *const dup_dirname = xstrdup(dd_dirname);
     AbrtP2Entry *entry = abrt_p2_entry_new(dup_dirname);
+
+    return abrt_p2_service_register_entry(service, entry, error);
+}
+
+struct abrt_p2_object *abrt_p2_service_register_entry(AbrtP2Service *service,
+            struct _AbrtP2Entry *entry, GError **error)
+{
+    const char *dd_dirname = abrt_p2_entry_problem_id(entry);
+    char *path = entry_object_dir_name_to_path(dd_dirname);
 
     struct abrt_p2_object *obj = abrt_p2_object_new(service,
                                   &(service->pv->p2srv_p2_entry_type),
@@ -1246,16 +1273,26 @@ char *abrt_p2_service_save_problem( AbrtP2Service *service,
     return retval;
 }
 
-int abrt_p2_service_remove_problem(AbrtP2Service *service,
-            const char *entry_path, uid_t caller_uid, GError **error)
+struct abrt_p2_object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
+            const char *entry_path, GError **error)
 {
     struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
     if (obj == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
                 "Requested Entry does not exist");
-        return -ENOENT;
     }
+
+    return obj;
+}
+
+
+int abrt_p2_service_remove_problem(AbrtP2Service *service,
+            const char *entry_path, uid_t caller_uid, GError **error)
+{
+    struct abrt_p2_object *obj = abrt_p2_service_get_entry_object(service, entry_path, error);
+    if (obj == NULL);
+        return -ENOENT;
 
     const int ret = abrt_p2_entry_delete(ABRT_P2_ENTRY(obj->node), caller_uid, error);
     if (ret != 0)
@@ -1268,13 +1305,9 @@ int abrt_p2_service_remove_problem(AbrtP2Service *service,
 GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error)
 {
-    struct abrt_p2_object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
+    struct abrt_p2_object *obj = abrt_p2_service_get_entry_object(service, entry_path, error);
     if (obj == NULL)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
-                "Requested Entry does not exist");
         return NULL;
-    }
 
     return abrt_p2_entry_problem_data(ABRT_P2_ENTRY(obj->node), caller_uid, error);
 }
@@ -1298,134 +1331,38 @@ GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
 }
 
 /*
+ *
+ */
+struct abrt_p2_object *task_object_register(AbrtP2Task *task)
+{
+    return NULL;
+}
+
+/*
  * /org/freedesktop/Problems2
  */
 GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
                    GVariant *problem_info, gint32 flags, uid_t caller_uid,
                    GUnixFDList *fd_list, GError **error)
 {
-    int r = abrt_p2_service_user_can_create_new_problem(service, caller_uid);
-    if (r == 0)
+    AbrtP2TaskNewProblem *p2t_np = abrt_p2_task_new_problem_new(service,
+                                                    problem_info, caller_uid,
+                                                    g_object_ref(fd_list));
+
+    if (!(flags & 1))
     {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
-                    "Too many problems have been recently created");
-        return NULL;
-    }
-    if (r == -E2BIG)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_LIMITS_EXCEEDED,
-                    "No more problems can be created");
-        return NULL;
-    }
-    if (r < 0)
-    {
-        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                    "Failed to check NewProblem limits");
+        abrt_p2_task_autonomous_run(ABRT_P2_TASK(p2t_np), error);
         return NULL;
     }
 
-    char *problem_id = NULL;
-    const char *new_path = NULL;
+    if (flags & 2)
+        abrt_p2_task_new_problem_wait_before_notify(p2t_np, true);
 
-    problem_id = abrt_p2_service_save_problem(service, problem_info, fd_list,
-                                              caller_uid, error);
+    if (flags & 4)
+        abrt_p2_task_start(ABRT_P2_TASK(p2t_np), error);
 
-    if (problem_id)
-    {
-        char *message = NULL;
-        int r = notify_new_path_with_reponse(problem_id, &message);
-
-        log_debug("New path processed: %u", r);
-        if (message != NULL && r == 303)
-        {
-            new_path = entry_object_dir_name_to_path(message);
-            log_debug("New occurrence of '%s'", new_path);
-        }
-        else
-        {
-            struct abrt_p2_object *obj = entry_object_register_dump_dir(service, problem_id, error);
-            if (obj != NULL)
-            {
-                new_path = obj->path;
-                log_debug("New problem '%s'", new_path);
-                AbrtP2Entry *entry = abrt_p2_object_get_node(obj);
-                uid_t uid = abrt_p2_entry_get_owner(entry, error);
-                if (uid >= 0)
-                {
-                    GVariant *parameters = g_variant_new("(oi)", new_path, (gint32)uid);
-                    abrt_p2_object_emit_signal(service->pv->p2srv_p2_object, "Crash", parameters);
-                }
-            }
-        }
-    }
-
-    free(problem_id);
-
-    if (new_path == NULL)
-        return NULL;
-
-    return g_variant_new("(o)", new_path);
-}
-
-typedef struct
-{
-    GVariant *problem_info;
-    gint32 flags;
-    uid_t caller_uid;
-    GUnixFDList *fd_list;
-} AbrtP2ServiceNewProblemData;
-
-#define abrt_p2_service_new_problem_data_new() \
-    xmalloc(sizeof(AbrtP2ServiceNewProblemData))
-
-static void abrt_p2_service_new_problem_data_free(AbrtP2ServiceNewProblemData *data)
-{
-    free(data);
-}
-
-static void abrt_p2_service_new_problem_async_task(GTask *task,
-            gpointer source_object, gpointer task_data,
-            GCancellable *cancellable)
-{
-    AbrtP2Service *service = source_object;
-    AbrtP2ServiceNewProblemData *data = task_data;
-
-    GError *error = NULL;
-    GVariant *response = abrt_p2_service_new_problem(service,
-                            data->problem_info, data->flags, data->caller_uid,
-                            data->fd_list, &error);
-
-    if (error == NULL)
-        g_task_return_pointer(task, response, (GDestroyNotify)g_variant_unref);
-    else
-        g_task_return_error(task, error);
-}
-
-void abrt_p2_service_new_problem_async(AbrtP2Service *service,
-                   GVariant *problem_info, gint32 flags, uid_t caller_uid,
-                   GUnixFDList *fd_list,
-                   GCancellable *cancellable, GAsyncReadyCallback callback,
-                   gpointer user_data)
-{
-    AbrtP2ServiceNewProblemData *data = abrt_p2_service_new_problem_data_new();
-    data->problem_info = problem_info;
-    data->flags = flags;
-    data->caller_uid = caller_uid;
-    data->fd_list = fd_list;
-
-    GTask *task = g_task_new(service, cancellable, callback, user_data);
-    g_task_set_task_data(task, data, (GDestroyNotify)abrt_p2_service_new_problem_data_free);
-    g_task_run_in_thread(task, abrt_p2_service_new_problem_async_task);
-    g_object_unref(task);
-    return;
-}
-
-GVariant *abrt_p2_service_new_problem_finish(AbrtP2Service *service,
-                   GAsyncResult *result, GError **error)
-{
-    g_return_val_if_fail(g_task_is_valid(result, service), NULL);
-
-    return g_task_propagate_pointer(G_TASK(result), error);
+    struct abrt_p2_object *obj = task_object_register(ABRT_P2_TASK(p2t_np));
+    return g_variant_new("(o)", obj->path);
 }
 
 /**
@@ -1477,37 +1414,6 @@ GVariant *abrt_p2_service_delete_problems(AbrtP2Service *service,
 
 /* D-Bus method handler
  */
-
-struct p2_object_new_problem_context
-{
-    GDBusMethodInvocation *invocation;
-    GVariant* data;
-};
-
-static void p2_object_new_problem_cb(GObject *source_object,
-            GAsyncResult *result, gpointer user_data)
-{
-    AbrtP2Service *service = ABRT_P2_SERVICE(source_object);
-    struct p2_object_new_problem_context *context = user_data;
-
-    g_variant_unref(context->data);
-
-    GError *error = NULL;
-    GVariant *response = abrt_p2_service_new_problem_finish(service, result, &error);
-
-    if (error == NULL)
-    {
-        g_dbus_method_invocation_return_value(context->invocation, response);
-    }
-    else
-    {
-        g_dbus_method_invocation_return_gerror(context->invocation, error);
-        g_error_free(error);
-    }
-
-    free(context);
-}
-
 static void p2_object_dbus_method_call(GDBusConnection *connection,
                         const gchar *caller,
                         const gchar *object_path,
@@ -1547,16 +1453,8 @@ static void p2_object_dbus_method_call(GDBusConnection *connection,
         gint32 flags;
         g_variant_get_child(parameters, 1, "i", &flags);
 
-        struct p2_object_new_problem_context *context = xmalloc(sizeof(*context));
-        context->invocation = g_object_ref(invocation);
-        context->data = data;
-
-        GCancellable *cancellable = g_cancellable_new();
-        abrt_p2_service_new_problem_async(service, data, flags,
-                caller_uid, fd_list, cancellable,
-                p2_object_new_problem_cb, context);
-
-        return;
+        response = abrt_p2_service_new_problem(service, data, flags,
+                caller_uid, fd_list, &error);
     }
     else if (strcmp("GetSession", method_name) == 0)
     {
