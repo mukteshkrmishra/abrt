@@ -16,12 +16,15 @@
   51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#ifndef ABRT_PROBLEMS2_SESSION_NODE
-#define ABRT_PROBLEMS2_SESSION_NODE
+#ifndef ABRT_PROBLEMS2_SESSION_H
+#define ABRT_PROBLEMS2_SESSION_H
+
+#include "abrt_problems2_task.h"
 
 #include <polkit/polkit.h>
 #include <glib-object.h>
 #include <gio/gio.h>
+#include <inttypes.h>
 
 G_BEGIN_DECLS
 
@@ -41,6 +44,12 @@ int abrt_p2_session_check_sanity(AbrtP2Session *session, const char *caller, uid
 const char *abrt_p2_session_locale(AbrtP2Session *session, char *locale);
 void abrt_p2_session_set_locale(AbrtP2Session *session, char *locale);
 
+uint32_t abrt_p2_session_add_task(AbrtP2Session *session, AbrtP2Task *task, GError **error);
+void abrt_p2_session_remove_task(AbrtP2Session *session, AbrtP2Task *task, GError **error);
+int abrt_p2_session_owns_task(AbrtP2Session *session, AbrtP2Task *task);
+GList *abrt_p2_session_tasks(AbrtP2Session *session);
+int abrt_p2_session_tasks_count(AbrtP2Session *session);
+
 /*
  * Class methods
  */
@@ -50,4 +59,4 @@ PolkitAuthority *abrt_p2_session_class_release_polkit_authority(void);
 
 G_END_DECLS
 
-#endif/*ABRT_PROBLEMS2_SESSION_NODE*/
+#endif/*ABRT_PROBLEMS2_SESSION_H*/

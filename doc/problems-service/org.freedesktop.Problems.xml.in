@@ -946,14 +946,6 @@ for prblmprx in problems.GetProblems():
                 </arg>
             </method>
 
-            <method name="Continue">
-                <tp:docstring>Request to continue in processing of the task. This method can be called only if the status property equals TASK_STOPPED.</tp:docstring>
-
-                <arg type='a{sv}' name='options' direction='in'>
-                    <tp:docstring>For future needs</tp:docstring>
-                </arg>
-            </method>
-
             <method name="Cancel">
                 <tp:docstring>Request to cancel processing of the task. The task will be disposed after that. This method can be called only if the status property equals TASK_PROCESSING.</tp:docstring>
 
@@ -990,7 +982,8 @@ for prblmprx in problems.GetProblems():
             </property>
 
             <property name='status' type='i' access='read'>
-                <tp:docstring>This property supports org.freedesktop.DBus.Properties.PropertiesChanged singal.
+                <annotation name="org.freedesktop.DBus.Property.EmitsChangedSignal" value="true"/>
+                <tp:docstring>This property supports org.freedesktop.DBus.Properties.PropertiesChanged signal.
                         <variablelist>
                             <varlistentry>
                                 <term>0</term>
@@ -1006,11 +999,15 @@ for prblmprx in problems.GetProblems():
                             </varlistentry>
                             <varlistentry>
                                 <term>3</term>
-                                <listitem><para>TASK_DONE: processing has been finished</para></listitem>
+                                <listitem><para>TASK_CANCELED: processing has been canceled</para></listitem>
                             </varlistentry>
                             <varlistentry>
-                                <term>3</term>
+                                <term>4</term>
                                 <listitem><para>TASK_FAILED: processing has been failed</para></listitem>
+                            </varlistentry>
+                            <varlistentry>
+                                <term>5</term>
+                                <listitem><para>TASK_DONE: processing has been finished</para></listitem>
                             </varlistentry>
                         </variablelist>
                 </tp:docstring>

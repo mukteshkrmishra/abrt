@@ -27,7 +27,7 @@
 G_BEGIN_DECLS
 
 #define TYPE_ABRT_P2_TASK_NEW_PROBLEM abrt_p2_task_new_problem_get_type ()
-G_DECLARE_FINAL_TYPE(AbrtP2TaskNewProblem, abrt_p2_task_new_problem, ABRT_P2_TASK, NEW_PROBLEM, AbrtP2Task)
+G_DECLARE_FINAL_TYPE(AbrtP2TaskNewProblem, abrt_p2_task_new_problem, ABRT_P2, TASK_NEW_PROBLEM, AbrtP2Task)
 
 typedef enum {
     ABRT_P2_TASK_NEW_PROBLEM_ACCEPTED,

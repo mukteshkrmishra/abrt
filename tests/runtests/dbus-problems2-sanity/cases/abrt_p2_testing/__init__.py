@@ -135,6 +135,9 @@ class _Problems2Object(object):
     def getobject(self):
         return object.__getattribute__(self, "_obj")
 
+    def getobjectproperties(self):
+        return object.__getattribute__(self, "_properties")
+
     def getproperty(self, name):
         properties = object.__getattribute__(self, "_properties")
         interface = object.__getattribute__(self, "_interface")
@@ -151,6 +154,12 @@ class Problems2Session(_Problems2Object):
 
     def __init__(self, bus, path):
         super(Problems2Session, self).__init__(bus, path, "org.freedesktop.Problems2.Session")
+
+
+class Problems2Task(_Problems2Object):
+
+    def __init__(self, bus, path):
+        super(Problems2Task, self).__init__(bus, path, "org.freedesktop.Problems2.Task")
 
 
 class TestCase(unittest.TestCase):
@@ -204,7 +213,7 @@ class TestCase(unittest.TestCase):
         self.loop.run()
 
     def _kill_loop(self):
-        printf("Loop interrupted on timeout")
+        print("Loop interrupted on timeout")
         self.interrupt_waiting(emergency=True)
 
     def interrupt_waiting(self, emergency=True):
@@ -276,14 +285,21 @@ def create_problem(test, p2, wait=True, description=None):
     if not "duphash" in description:
         description["duphash"] = randomstring
 
-    p2p = p2.NewProblem(description, 0)
-
+    p2p = None
     if wait:
-        wait_for_hooks(test)
+        p2t = p2.NewProblem(description, 1)
+        p2p = wait_for_hooks(test, p2t)
+    else:
+        p2.NewProblem(description, 0)
 
     return p2p
 
 def create_fully_initialized_problem(test, p2, wait=True, unique=False):
+    with create_fully_initialized_details(unique) as description:
+            return create_problem(test, p2, wait, description)
+
+@contextmanager
+def create_fully_initialized_details(unique=False):
     data = "ABRT test case huge file " * 41
     with open("/tmp/hugetext", "w") as hugetext_file:
         # 9000KiB > 8MiB
@@ -312,8 +328,15 @@ def create_fully_initialized_problem(test, p2, wait=True, unique=False):
             if not unique:
                 description["uuid"] = "0123456789ABCDEF"
                 description["duphash"] = "FEDCBA9876543210"
+            else:
+                randomstring = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(16))
+                if not "uuid" in description:
+                    description["uuid"] = randomstring
+                if not "duphash" in description:
+                    description["duphash"] = randomstring
 
-            return create_problem(test, p2, wait, description)
+            yield description
+
 
 def get_huge_file_path(size_kb=(DBUS_LIMIT_DATA_SIZE_KB + 1)):
     huge_file_path = "/var/tmp/abrt.testsuite.huge-file"

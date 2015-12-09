@@ -62,10 +62,12 @@ PolkitAuthority *abrt_p2_session_class_release_polkit_authority(void)
 
 typedef struct
 {
-    char   *p2s_caller;
-    uid_t   p2s_uid;
-    int     p2s_state;
-    time_t  p2s_stamp;
+    char     *p2s_caller;
+    uid_t    p2s_uid;
+    int      p2s_state;
+    time_t   p2s_stamp;
+    GList    *p2s_tasks;
+    uint32_t p2s_task_indexer;
     struct check_auth_cb_params *p2s_auth_rq;
 } AbrtP2SessionPrivate;
 
@@ -329,3 +331,46 @@ int abrt_p2_session_check_sanity(AbrtP2Session *session,
             "Your Problems2 Session is broken. Check system logs for more details.");
     return -1;
 }
+
+uint32_t abrt_p2_session_add_task(AbrtP2Session *session, AbrtP2Task *task, GError **error)
+{
+    if (session->pv->p2s_task_indexer == (UINT32_MAX - 1))
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Reached the limit of task per session.");
+        return UINT32_MAX;
+    }
+
+    if (abrt_p2_session_owns_task(session, task) == 0)
+    {
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                "Task is already owned by the session");
+
+        return UINT32_MAX;
+    }
+
+    session->pv->p2s_tasks = g_list_prepend(session->pv->p2s_tasks, task);
+
+    return session->pv->p2s_task_indexer++;
+}
+
+void abrt_p2_session_remove_task(AbrtP2Session *session, AbrtP2Task *task, GError **error)
+{
+    session->pv->p2s_tasks = g_list_remove(session->pv->p2s_tasks, task);
+}
+
+GList *abrt_p2_session_tasks(AbrtP2Session *session)
+{
+    return session->pv->p2s_tasks;
+}
+
+int abrt_p2_session_owns_task(AbrtP2Session *session, AbrtP2Task *task)
+{
+    return !(g_list_find(session->pv->p2s_tasks, task));
+}
+
+int abrt_p2_session_tasks_count(AbrtP2Session *session)
+{
+    return g_list_length(session->pv->p2s_tasks);
+}
+

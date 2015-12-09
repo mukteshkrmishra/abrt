@@ -12,6 +12,9 @@ $(NS).Entry.xml: tools/spec-to-pure-dbus.xsl $(SPEC)
 $(NS).Session.xml: tools/spec-to-pure-dbus.xsl $(SPEC)
 	xsltproc --stringparam interface $$(basename $@ .xml) $^ > $@
 
+$(NS).Task.xml: tools/spec-to-pure-dbus.xsl $(SPEC)
+	xsltproc --stringparam interface $$(basename $@ .xml) $^ > $@
+
 specification.xml: specification.xml.in
 	cp $< $@
 
@@ -28,7 +31,7 @@ reference.xml: tools/spec-to-docbook.xsl $(SPEC)
 	xsltproc $^ > $@
 
 dbusabrtinterfacesdir = ${dbusinterfacedir}
-dist_dbusabrtinterfaces_DATA = $(NS).xml $(NS).Entry.xml $(NS).Session.xml
+dist_dbusabrtinterfaces_DATA = $(NS).xml $(NS).Entry.xml $(NS).Session.xml $(NS).Task.xml
 
 dbusabrtdocdir = ${datadir}/doc/abrt-dbus-${VERSION}/html
 dist_dbusabrtdoc_DATA = html/style.css

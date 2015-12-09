@@ -1088,6 +1088,7 @@ killall abrt-dbus >/dev/null 2>&1 || :
 %{_datadir}/dbus-1/interfaces/org.freedesktop.Problems2.xml
 %{_datadir}/dbus-1/interfaces/org.freedesktop.Problems2.Entry.xml
 %{_datadir}/dbus-1/interfaces/org.freedesktop.Problems2.Session.xml
+%{_datadir}/dbus-1/interfaces/org.freedesktop.Problems2.Task.xml
 %{_datadir}/dbus-1/interfaces/com.redhat.problems.configuration.xml
 %{_datadir}/dbus-1/interfaces/com.redhat.problems.configuration.abrt.xml
 %{_datadir}/dbus-1/interfaces/com.redhat.problems.configuration.ccpp.xml

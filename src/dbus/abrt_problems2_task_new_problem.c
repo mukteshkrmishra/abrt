@@ -25,13 +25,13 @@ typedef struct
     GVariant *p2tnp_problem_info;
     uid_t p2tnp_caller_uid;
     GUnixFDList *p2tnp_fd_list;
-    struct abrt_p2_object *p2tnp_obj;
+    AbrtP2Object *p2tnp_obj;
     bool p2tnp_wait_before_notify;
 } AbrtP2TaskNewProblemPrivate;
 
 struct _AbrtP2TaskNewProblem
 {
-    AbrtP2Task *parent_instance;
+    AbrtP2Task parent_instance;
     AbrtP2TaskNewProblemPrivate *pv;
 };
 
@@ -43,7 +43,9 @@ static void abrt_p2_task_new_problem_finalize(GObject *gobject)
 {
     AbrtP2TaskNewProblemPrivate *pv = abrt_p2_task_new_problem_get_instance_private(ABRT_P2_TASK_NEW_PROBLEM(gobject));
     g_variant_unref(pv->p2tnp_problem_info);
-    g_object_unref(pv->p2tnp_fd_list);
+
+    if (pv->p2tnp_fd_list)
+        g_object_unref(pv->p2tnp_fd_list);
 }
 
 static void abrt_p2_task_new_problem_class_init(AbrtP2TaskNewProblemClass *klass)
@@ -81,9 +83,7 @@ void abrt_p2_task_new_problem_wait_before_notify(AbrtP2TaskNewProblem *task,
     task->pv->p2tnp_wait_before_notify = value;
 }
 
-
-
-static struct abrt_p2_object *abrt_p2_task_new_problem_create_directory_task(AbrtP2TaskNewProblem *task, GError **error)
+static AbrtP2Object *abrt_p2_task_new_problem_create_directory_task(AbrtP2TaskNewProblem *task, GError **error)
 {
     int r = abrt_p2_service_user_can_create_new_problem(task->pv->p2tnp_service, task->pv->p2tnp_caller_uid);
     if (r == 0)
@@ -106,15 +106,16 @@ static struct abrt_p2_object *abrt_p2_task_new_problem_create_directory_task(Abr
     }
 
     char *problem_id = abrt_p2_service_save_problem(task->pv->p2tnp_service,
-                                    task->pv->p2tnp_problem_info, task->pv->p2tnp_fd_list,
+                                    task->pv->p2tnp_problem_info,
+                                    task->pv->p2tnp_fd_list,
                                     task->pv->p2tnp_caller_uid, error);
     if (*error != NULL)
         return NULL;
 
     AbrtP2Entry *entry = abrt_p2_entry_new_with_state(problem_id, ABRT_P2_ENTRY_STATE_NEW);
-    struct abrt_p2_object *obj = abrt_p2_service_register_entry(task->pv->p2tnp_service,
+    AbrtP2Object *obj = abrt_p2_service_register_entry(task->pv->p2tnp_service,
                                     entry, error);
-    free(problem_id);
+
     if (*error != NULL)
         return NULL;
 
@@ -130,28 +131,44 @@ static int abrt_p2_task_new_problem_notify_directory_task(AbrtP2TaskNewProblem *
     char *message = NULL;
     const char *problem_id = abrt_p2_entry_problem_id(entry);
     int r = notify_new_path_with_reponse(problem_id, &message);
-
-    gint32 code;
-    log_debug("New path processed: %u", r);
-    if (r == 303)
+    if (r < 0)
     {
-        /* 303 - the daemon found a local duplicate problem */
+        log_debug("Failed to communicate with the problems daemon");
+
+        GError *local_error = NULL;
+        abrt_p2_entry_delete(entry, /* allow us to delete the temporary dir */0, &local_error);
+        if (local_error != NULL)
+        {
+            error_msg("Can't remove temporary problem directory: %s", local_error->message);
+            g_error_free(local_error);
+        }
 
         abrt_p2_object_destroy(task->pv->p2tnp_obj);
         task->pv->p2tnp_obj = NULL;
 
-        struct abrt_p2_object *obj = abrt_p2_service_get_entry_object(task->pv->p2tnp_service, message,
+        g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
+                    "Failed to notify the new problem directory");
+
+        return r;
+    }
+
+    gint32 code;
+    log_debug("New path processed: %d", r);
+    if (r == 303)
+    {
+        /* 303 - the daemon found a local duplicate problem */
+        log_debug("New occurrence of '%s'", *new_path);
+
+        abrt_p2_object_destroy(task->pv->p2tnp_obj);
+        task->pv->p2tnp_obj = NULL;
+
+        AbrtP2Object *obj = abrt_p2_service_get_entry_object(task->pv->p2tnp_service, message,
                                          error);
         if (obj == NULL)
-        {
-            code = ABRT_P2_TASK_NEW_PROBLEM_FAILED;
             return ABRT_P2_TASK_CODE_ERROR;
-        }
 
         *new_path = xstrdup(abrt_p2_object_path(obj));
         code = ABRT_P2_TASK_NEW_PROBLEM_DUPLICATE;
-
-        log_debug("New occurrence of '%s'", *new_path);
 
         /* TODO: what about to teach the service to understand task's signals? */
         abrt_p2_service_notify_entry_object(task->pv->p2tnp_service, obj, error);
@@ -159,22 +176,21 @@ static int abrt_p2_task_new_problem_notify_directory_task(AbrtP2TaskNewProblem *
     else if (r == 410)
     {
         /* 410 - the problem was refused by the daemon */
+        log_debug("Problem dropped");
 
         abrt_p2_object_destroy(task->pv->p2tnp_obj);
         task->pv->p2tnp_obj = NULL;
 
         code = ABRT_P2_TASK_NEW_PROBLEM_DROPPED;
-
-        log_debug("Problem dropped");
     }
     else if (r == 200)
     {
         /* 200 - the problem was accepted */
+        log_debug("New problem '%s'", *new_path);
 
         *new_path = xstrdup(abrt_p2_object_path(task->pv->p2tnp_obj));
         code = ABRT_P2_TASK_NEW_PROBLEM_ACCEPTED;
 
-        log_debug("New problem '%s'", *new_path);
 
         abrt_p2_entry_set_state(entry, ABRT_P2_ENTRY_STATE_COMPLETE);
         /* TODO: what about to teach the service to understand task's signals? */
@@ -182,13 +198,13 @@ static int abrt_p2_task_new_problem_notify_directory_task(AbrtP2TaskNewProblem *
     }
     else
     {
+        log_debug("Problem was invalid");
+
         abrt_p2_entry_delete(entry, /* allow us to delete the temporary dir */0, error);
         abrt_p2_object_destroy(task->pv->p2tnp_obj);
         task->pv->p2tnp_obj = NULL;
 
         code = ABRT_P2_TASK_NEW_PROBLEM_INVALID_DATA;
-
-        log_debug("Problem was invalid");
     }
 
     return code;
@@ -203,23 +219,28 @@ static AbrtP2TaskCode abrt_p2_task_new_problem_run(AbrtP2Task *task, GError **er
      * to stop the task after creation of the object. */
     if (np->pv->p2tnp_obj == NULL)
     {
-        struct abrt_p2_object *obj = abrt_p2_task_new_problem_create_directory_task(np, error);
+        AbrtP2Object *obj = abrt_p2_task_new_problem_create_directory_task(np, error);
         if (obj == NULL)
             return ABRT_P2_TASK_CODE_ERROR;
+
+        const char *temporary_entry_path = abrt_p2_object_path(obj);
+        GVariant *detail_path = g_variant_new_string(temporary_entry_path);
+        abrt_p2_task_add_detail(task, "NewProblem.TemporaryEntry", detail_path);
+
+        np->pv->p2tnp_obj = obj;
 
         if (np->pv->p2tnp_wait_before_notify)
         {
             /* Stop the task to allow users to modify the temporary object */
-            abrt_p2_task_add_detail(task, "NewProblem.TemporaryEntry",
-                                    g_variant_new_string(abrt_p2_object_path(obj)));
-            np->pv->p2tnp_obj = obj;
-
+            log_debug("Stopping NewProblem task");
             return ABRT_P2_TASK_CODE_STOP;
         }
     }
 
     char *new_path = NULL;
     gint32 code = abrt_p2_task_new_problem_notify_directory_task(np, &new_path, error);
+    if (code < 0)
+        return ABRT_P2_TASK_CODE_ERROR;
 
     GVariantDict response;
     g_variant_dict_init(&response, NULL);

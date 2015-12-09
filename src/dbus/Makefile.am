@@ -110,7 +110,8 @@ IFACE_DEF_DIR=$(abs_top_srcdir)/doc/problems-service/
 PROBLEMS2_XML_FILES=\
     $(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml \
     $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Entry.xml \
-    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml
+    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml \
+    $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Task.xml
 
 .PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml
 $(IFACE_DEF_DIR)/org.freedesktop.Problems2.xml:
@@ -122,6 +123,10 @@ $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Entry.xml:
 
 .PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml
 $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Session.xml:
+	$(MAKE) -C $(IFACE_DEF_DIR) $$(basename $@)
+
+.PHONY: $(IFACE_DEF_DIR)/org.freedesktop.Problems2.Task.xml
+$(IFACE_DEF_DIR)/org.freedesktop.Problems2.Task.xml:
 	$(MAKE) -C $(IFACE_DEF_DIR) $$(basename $@)
 
 .PHONY: abrt_problems2_generated_interfaces.h

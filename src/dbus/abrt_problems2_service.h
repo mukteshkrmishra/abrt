@@ -27,13 +27,16 @@
 #define ABRT_P2_NS_MEMBER(name) ABRT_P2_NS"."name
 
 /*
- * Service administration
+ * D-Bus object representation
  */
-struct abrt_p2_object;
-const char *abrt_p2_object_path(struct abrt_p2_object *obj);
-void *abrt_p2_object_get_node(struct abrt_p2_object *obj);
-void abrt_p2_object_destroy(struct abrt_p2_object *obj);
+typedef struct _AbrtP2Object AbrtP2Object;
+const char *abrt_p2_object_path(AbrtP2Object *obj);
+void *abrt_p2_object_get_node(AbrtP2Object *obj);
+void abrt_p2_object_destroy(AbrtP2Object *obj);
 
+/*
+ * Service - something like object manager
+ */
 #define TYPE_ABRT_P2_SERVICE abrt_p2_service_get_type ()
 G_DECLARE_FINAL_TYPE(AbrtP2Service, abrt_p2_service, ABRT_P2, SERVICE, GObject)
 
@@ -63,20 +66,20 @@ GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
 
 GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
 
-struct abrt_p2_object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
+AbrtP2Object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
             const char *entry_path, GError **error);
 
 struct _AbrtP2Entry;
-struct abrt_p2_object *abrt_p2_service_register_entry(AbrtP2Service *service,
+AbrtP2Object *abrt_p2_service_register_entry(AbrtP2Service *service,
             struct _AbrtP2Entry *entry, GError **error);
 
 void abrt_p2_service_notify_entry_object(AbrtP2Service *service,
-            struct abrt_p2_object *obj, GError **error);
+            AbrtP2Object *obj, GError **error);
 
 int abrt_p2_service_user_can_create_new_problem(AbrtP2Service *service,
             uid_t uid);
 
-GVariant *abrt_p2_service_new_problem(AbrtP2Service *service,
+GVariant *abrt_p2_service_new_problem(AbrtP2Service *service, AbrtP2Object *session_obj,
             GVariant *problem_info, gint32 flags, uid_t caller_uid,
             GUnixFDList *fd_list, GError **error);
 
@@ -112,21 +115,5 @@ unsigned abrt_p2_service_user_problems_limit(AbrtP2Service *service, uid_t uid);
 unsigned abrt_p2_service_new_problem_throtling_magnitude(AbrtP2Service *service, uid_t uid);
 
 unsigned abrt_p2_service_new_problems_batch(AbrtP2Service *service, uid_t uid);
-
-#if 0
-/*
- * D-Bus object representation
- */
-struct abrt_p2_object;
-
-AbrtP2Service *abrt_p2_object_service(struct abrt_p2_object *object);
-
-void *abrt_p2_object_get_node(struct abrt_p2_object *object);
-
-void abrt_p2_object_destroy(struct abrt_p2_object *object);
-
-void abrt_p2_object_emit_signal(struct abrt_p2_object *object,
-            const char *member, GVariant *parameters);
-#endif
 
 #endif/*ABRT_PROBLEMS2_SERVICE_H*/

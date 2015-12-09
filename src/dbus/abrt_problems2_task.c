@@ -18,27 +18,12 @@
 
 #include "abrt_problems2_task.h"
 
-typedef struct _AbrtP2TaskPrivate
-{
-    gint32 p2t_status;
-    GVariant *p2t_details;
-    GVariant *p2t_results;
-    gint32 p2t_code;
-    GCancellable *p2t_cancellable;
-} AbrtP2TaskPrivate;
-
 enum {
     SN_STATUS_CHANGED,
     SN_LAST_SIGNAL
 } SignalNumber;
 
 static guint s_signals[SN_LAST_SIGNAL] = { 0 };
-
-struct _AbrtP2Task
-{
-    GObject parent_instance;
-    AbrtP2TaskPrivate *pv;
-};
 
 G_DEFINE_TYPE_WITH_PRIVATE(AbrtP2Task, abrt_p2_task, G_TYPE_OBJECT)
 
@@ -68,6 +53,7 @@ static void abrt_p2_task_class_init(AbrtP2TaskClass *klass)
 static void abrt_p2_task_init(AbrtP2Task *self)
 {
     self->pv = abrt_p2_task_get_instance_private(self);
+    self->pv->p2t_details = g_variant_new("a{sv}", NULL);
 }
 
 static void abrt_p2_task_change_status(AbrtP2Task *task, AbrtP2TaskStatus status)
@@ -87,7 +73,7 @@ AbrtP2TaskStatus abrt_p2_task_status(AbrtP2Task *task)
 
 GVariant *abrt_p2_task_details(AbrtP2Task *task)
 {
-    return task->pv->p2t_details;
+    return g_variant_ref(task->pv->p2t_details);
 }
 
 void abrt_p2_task_add_detail(AbrtP2Task *task, const char *key, GVariant *value)
@@ -95,7 +81,10 @@ void abrt_p2_task_add_detail(AbrtP2Task *task, const char *key, GVariant *value)
     GVariantDict dict;
     g_variant_dict_init(&dict, task->pv->p2t_details);
     g_variant_dict_insert(&dict, key, "v", value);
-    g_variant_unref(task->pv->p2t_details);
+
+    if (task->pv->p2t_details)
+        g_variant_unref(task->pv->p2t_details);
+
     task->pv->p2t_details = g_variant_dict_end(&dict);
 }
 
@@ -144,7 +133,11 @@ void abrt_p2_task_finish(AbrtP2Task *task, GVariant **result, gint32 *code,
     if (*error != NULL)
         return;
 
-    *result = g_variant_ref(task->pv->p2t_results);
+    if (task->pv->p2t_results)
+        *result = g_variant_ref(task->pv->p2t_results);
+    else
+        *result = g_variant_new("a{sv}", NULL);
+
     *code = task->pv->p2t_code;
 }
 
@@ -153,9 +146,16 @@ static void abrt_p2_task_finish_gtask(GObject *source_object,
 {
     AbrtP2Task *task = ABRT_P2_TASK(source_object);
 
-    if (g_task_is_valid(result, task))
+    if (!g_task_is_valid(result, task))
     {
-        error_msg("BUG: %s: invalid GTask", __func__);
+        error_msg("BUG:%s:%s: invalid GTask", __FILE__, __func__);
+
+        GVariantDict response;
+        g_variant_dict_init(&response, NULL);
+        g_variant_dict_insert(&response, "Error.Message", "s", "Internal error");
+        abrt_p2_task_set_response(task, g_variant_dict_end(&response));
+
+        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_FAILED);
         return;
     }
 
@@ -171,14 +171,16 @@ static void abrt_p2_task_finish_gtask(GObject *source_object,
 
         abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_FAILED);
     }
-    else if (code >= ABRT_P2_TASK_CODE_DONE)
-    {
-        task->pv->p2t_code = code - ABRT_P2_TASK_CODE_DONE;
-        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_DONE);
-    }
     else if (code == ABRT_P2_TASK_CODE_STOP)
     {
+        log_debug("Task stopped");
         abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_STOPPED);
+    }
+    else if (code >= ABRT_P2_TASK_CODE_DONE)
+    {
+        log_debug("Task done");
+        task->pv->p2t_code = code - ABRT_P2_TASK_CODE_DONE;
+        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_DONE);
     }
 }
 
@@ -197,7 +199,7 @@ static void abrt_p2_task_thread(GTask *task,
         g_task_return_error(task, error);
 }
 
-void abrt_p2_task_start(AbrtP2Task *task, GError **error)
+void abrt_p2_task_start(AbrtP2Task *task, GVariant *options, GError **error)
 {
     if (   task->pv->p2t_status != ABRT_P2_TASK_STATUS_NEW
         && task->pv->p2t_status != ABRT_P2_TASK_STATUS_STOPPED)
@@ -208,7 +210,7 @@ void abrt_p2_task_start(AbrtP2Task *task, GError **error)
     }
 
     if (ABRT_P2_TASK_GET_CLASS(task)->start)
-        ABRT_P2_TASK_GET_CLASS(task)->start(task, error);
+        ABRT_P2_TASK_GET_CLASS(task)->start(task, options, error);
 
     if (*error != NULL)
         return;
@@ -292,5 +294,5 @@ void abrt_p2_task_autonomous_run(AbrtP2Task *task, GError **error)
     g_signal_connect(task, "status-changed",
             G_CALLBACK(abrt_p2_task_autonomous_cb), NULL);
 
-    abrt_p2_task_start(task, error);
+    abrt_p2_task_start(task, NULL, error);
 }
