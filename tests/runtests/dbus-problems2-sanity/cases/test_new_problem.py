@@ -1,4 +1,5 @@
 #!/usr/bin/python3
+# vim: set makeprg=python3-flake8\ %
 
 import os
 

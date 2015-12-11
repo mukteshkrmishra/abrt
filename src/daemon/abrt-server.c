@@ -875,9 +875,11 @@ int main(int argc, char **argv)
     if (rsp.message != NULL)
     {
         printf("%s", rsp.message);
+        log("Sent response: %u - %s", rsp.code, rsp.message);
         fflush(stdout);
         free(rsp.message);
     }
+
 
     return (r >= 400); /* Error if 400+ */
 }

@@ -1,33 +1,32 @@
 #!/usr/bin/python3
 
 import abrt_p2_testing
-from abrt_p2_testing import (wait_for_hooks,
-                             DBUS_ERROR_ACCESS_DENIED_DELETE,
+from abrt_p2_testing import (wait_for_task_new_problem,
                              DBUS_ERROR_BAD_ADDRESS,)
 
 
 class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
 
     def test_delete_problems(self):
-        description = {"analyzer"    : "problems2testsuite_analyzer",
-                       "type"        : "problems2testsuite_type",
-                       "reason"      : "Application has been killed",
-                       "backtrace"   : "die()",
-                       "executable"  : "/usr/bin/true",
-                       "duphash"     : None,
-                       "uuid"        : None}
+        description = {"analyzer": "problems2testsuite_analyzer",
+                       "type": "problems2testsuite_type",
+                       "reason": "Application has been killed",
+                       "backtrace": "die()",
+                       "executable": "/usr/bin/true",
+                       "duphash": None,
+                       "uuid": None}
 
         description["duphash"] = description["uuid"] = "DEADBEEF"
-        one = self.p2.NewProblem(description, 0)
-        wait_for_hooks(self)
+        task_one_path = self.p2.NewProblem(description, 0x1)
+        one = wait_for_task_new_problem(self, self.bus, task_one_path)
 
         description["duphash"] = description["uuid"] = "81680083"
-        two = self.p2.NewProblem(description, 0)
-        wait_for_hooks(self)
+        task_two_path = self.p2.NewProblem(description, 0x1)
+        two = wait_for_task_new_problem(self, self.bus, task_two_path)
 
         description["duphash"] = description["uuid"] = "FFFFFFFF"
-        three = self.p2.NewProblem(description, 0)
-        wait_for_hooks(self)
+        task_three_path = self.p2.NewProblem(description, 0x1)
+        three = wait_for_task_new_problem(self, self.bus, task_three_path)
 
         p = self.p2.GetProblems(0)
 
@@ -44,7 +43,8 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
         self.assertIn(three, p)
 
         self.assertRaisesDBusError(DBUS_ERROR_BAD_ADDRESS,
-                    self.p2.DeleteProblems, [two, three, one])
+                                   self.p2.DeleteProblems,
+                                   [two, three, one])
 
         p = self.p2.GetProblems(0)
 
@@ -55,10 +55,12 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
         self.p2.DeleteProblems([])
 
         self.assertRaisesDBusError(DBUS_ERROR_BAD_ADDRESS,
-                self.p2.DeleteProblems, ["/invalid/path"])
+                                   self.p2.DeleteProblems,
+                                   ["/invalid/path"])
 
         self.assertRaisesDBusError(DBUS_ERROR_BAD_ADDRESS,
-                self.p2.DeleteProblems, ["/org/freedesktop/Problems2/Entry/FAKE"])
+                                   self.p2.DeleteProblems,
+                                   ["/org/freedesktop/Problems2/Entry/FAKE"])
 
 
 if __name__ == "__main__":

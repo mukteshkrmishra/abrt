@@ -69,6 +69,9 @@ GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
 AbrtP2Object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
             const char *entry_path, GError **error);
 
+AbrtP2Object *abrt_p2_service_get_entry_for_problem(AbrtP2Service *service,
+            const char *problem_id, GError **error);
+
 struct _AbrtP2Entry;
 AbrtP2Object *abrt_p2_service_register_entry(AbrtP2Service *service,
             struct _AbrtP2Entry *entry, GError **error);

@@ -163,6 +163,8 @@ static void abrt_p2_task_finish_gtask(GObject *source_object,
     const gint32 code = g_task_propagate_int(G_TASK(result), &error);
     if (error != NULL)
     {
+        log_debug("Task failed with error: %s", error->message);
+
         GVariantDict response;
         g_variant_dict_init(&response, NULL);
         g_variant_dict_insert(&response, "Error.Message", "s", error->message);

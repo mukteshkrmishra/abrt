@@ -80,6 +80,26 @@ static void problems2_object_type_destroy(struct problems2_object_type *type)
     }
 }
 
+#if 0
+/* Debuging function */
+static void problems2_object_type_print_all_objects(struct problems2_object_type *type, const char *prefix)
+{
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, type->objects);
+
+    const char *p;
+    AbrtP2Object *obj;
+    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
+        log("%s: '%s' : %p", prefix, p, obj);
+}
+#endif
+
+static AbrtP2Object *problems2_object_type_get_object(struct problems2_object_type *type, const char *path)
+{
+    AbrtP2Object *obj = g_hash_table_lookup(type->objects, path);
+    return obj;
+}
+
 /*
  * User details
  */
@@ -258,7 +278,7 @@ static AbrtP2Object *abrt_p2_object_new(AbrtP2Service *service,
 
     obj->p2o_regid = registration_id;
 
-    g_hash_table_insert(obj->p2o_type->objects, path, obj);
+    g_hash_table_insert(type->objects, path, obj);
 
     return obj;
 }
@@ -464,7 +484,7 @@ static AbrtP2Object *abrt_p2_service_get_session_for_caller(
 {
     char *session_path = session_object_caller_to_path(caller);
 
-    AbrtP2Object *obj = g_hash_table_lookup(service->pv->p2srv_p2_session_type.objects, session_path);
+    AbrtP2Object *obj = problems2_object_type_get_object(&(service->pv->p2srv_p2_session_type), session_path);
     if (obj == NULL)
     {
         log_debug("Caller does not have Session: %s", caller);
@@ -1278,7 +1298,8 @@ char *abrt_p2_service_save_problem( AbrtP2Service *service,
 AbrtP2Object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
             const char *entry_path, GError **error)
 {
-    AbrtP2Object *obj = g_hash_table_lookup(service->pv->p2srv_p2_entry_type.objects, entry_path);
+    AbrtP2Object *obj = problems2_object_type_get_object(&(service->pv->p2srv_p2_entry_type), entry_path);
+
     if (obj == NULL)
     {
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_BAD_ADDRESS,
@@ -1288,17 +1309,32 @@ AbrtP2Object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
     return obj;
 }
 
+AbrtP2Object *abrt_p2_service_get_entry_for_problem(AbrtP2Service *service,
+            const char *problem_id, GError **error)
+{
+    char *entry_path = entry_object_dir_name_to_path(problem_id);
+    AbrtP2Object *obj = abrt_p2_service_get_entry_object(service, entry_path, error);
+    free(entry_path);
+
+    return obj;
+}
 
 int abrt_p2_service_remove_problem(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error)
 {
     AbrtP2Object *obj = abrt_p2_service_get_entry_object(service, entry_path, error);
-    if (obj == NULL);
+    if (obj == NULL)
+    {
+        log_debug("The requested Problem Entry does not exist");
         return -ENOENT;
+    }
 
     const int ret = abrt_p2_entry_delete(ABRT_P2_ENTRY(obj->node), caller_uid, error);
     if (ret != 0)
+    {
+        log_debug("Failed to remove Entry's data directory");
         return ret;
+    }
 
     abrt_p2_object_destroy(obj);
     return 0;
@@ -1651,13 +1687,14 @@ GVariant *abrt_p2_service_delete_problems(AbrtP2Service *service,
             GVariant *entries, uid_t caller_uid, GError **error)
 {
     GVariantIter *iter;
-    gchar *entry_node;
+    gchar *entry_path;
     g_variant_get(entries, "ao", &iter);
-    while (g_variant_iter_loop(iter, "o", &entry_node))
+    while (g_variant_iter_loop(iter, "o", &entry_path))
     {
-        if (abrt_p2_service_remove_problem(service, entry_node, caller_uid, error) != 0)
+        log_debug("Removing Problem Entry: '%s'", entry_path);
+        if (abrt_p2_service_remove_problem(service, entry_path, caller_uid, error) != 0)
         {
-            g_free(entry_node);
+            g_free(entry_path);
             return NULL;
         }
     }

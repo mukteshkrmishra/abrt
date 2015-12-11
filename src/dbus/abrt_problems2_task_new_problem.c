@@ -157,18 +157,25 @@ static int abrt_p2_task_new_problem_notify_directory_task(AbrtP2TaskNewProblem *
     if (r == 303)
     {
         /* 303 - the daemon found a local duplicate problem */
-        log_debug("New occurrence of '%s'", *new_path);
 
         abrt_p2_object_destroy(task->pv->p2tnp_obj);
         task->pv->p2tnp_obj = NULL;
 
-        AbrtP2Object *obj = abrt_p2_service_get_entry_object(task->pv->p2tnp_service, message,
-                                         error);
+        AbrtP2Object *obj = abrt_p2_service_get_entry_for_problem(
+                                                    task->pv->p2tnp_service,
+                                                    message,
+                                                    error);
         if (obj == NULL)
+        {
+            error_msg("Problem Entry for directory '%s' does not exist", message);
+            free(message);
             return ABRT_P2_TASK_CODE_ERROR;
+        }
 
         *new_path = xstrdup(abrt_p2_object_path(obj));
         code = ABRT_P2_TASK_NEW_PROBLEM_DUPLICATE;
+
+        log_debug("New occurrence of '%s'", *new_path);
 
         /* TODO: what about to teach the service to understand task's signals? */
         abrt_p2_service_notify_entry_object(task->pv->p2tnp_service, obj, error);
@@ -207,6 +214,7 @@ static int abrt_p2_task_new_problem_notify_directory_task(AbrtP2TaskNewProblem *
         code = ABRT_P2_TASK_NEW_PROBLEM_INVALID_DATA;
     }
 
+    free(message);
     return code;
 }
 
@@ -248,6 +256,7 @@ static AbrtP2TaskCode abrt_p2_task_new_problem_run(AbrtP2Task *task, GError **er
     if (new_path != NULL)
         g_variant_dict_insert(&response, "NewProblem.Entry", "s", new_path);
 
+    log_debug("NewProblem task has successfully finished");
     abrt_p2_task_set_response(task, g_variant_dict_end(&response));
     return ABRT_P2_TASK_CODE_DONE + code;
 }
