@@ -1,9 +1,11 @@
 #!/usr/bin/python3
+# vim: set makeprg=python3-flake8\ %
 
 import os
 
 import abrt_p2_testing
-from abrt_p2_testing import (create_problem)
+from abrt_p2_testing import (create_problem, Problems2Entry)
+
 
 class TestCrashSanity(abrt_p2_testing.TestCase):
 
@@ -22,22 +24,43 @@ class TestCrashSanity(abrt_p2_testing.TestCase):
             self.root_p2.DeleteProblems([self.p2_entry_root_path])
 
     def test_user_crash_signal(self):
-        self.p2_entry_path = create_problem(self, self.p2)
+        uuid, duphash = create_problem(self, self.p2, bus=self.bus, wait=False)
 
         self.wait_for_signals(["Crash"])
 
-        if self.assertTrue(len(self.crash_signal_occurrences) == 1, "Crash signal wasn't emitted"):
-            self.assertEqual(self.p2_entry_path, self.crash_signal_occurrences[0][0], "Crash signal was emitted with wrong PATH")
-            self.assertEqual(os.geteuid(),  self.crash_signal_occurrences[0][1], "Crash signal was emitted with wrong UID")
+        self.assertEqual(len(self.crash_signal_occurrences),
+                         1,
+                         "Crash signal wasn't emitted")
+
+        self.assertEqual(os.geteuid(),
+                         self.crash_signal_occurrences[0][1],
+                         "Crash signal was emitted with wrong UID")
+
+        self.p2_entry_path = self.crash_signal_occurrences[0][0]
+        p2e = Problems2Entry(self.root_bus, self.p2_entry_path)
+        self.assertEqual(uuid, p2e.getproperty("uuid"))
+        self.assertEqual(duphash, p2e.getproperty("duphash"))
 
     def test_foreign_crash_signal(self):
-        self.p2_entry_root_path = create_problem(self, self.root_p2)
+        uuid, duphash = create_problem(self,
+                                       self.root_p2,
+                                       bus=self.root_bus,
+                                       wait=False)
 
         self.wait_for_signals(["Crash"])
 
-        if self.assertTrue(len(self.crash_signal_occurrences) == 1, "Crash signal for root's problem wasn't emitted"):
-            self.assertEqual(self.p2_entry_root_path, self.crash_signal_occurrences[0][0], "Crash signal was emitted with wrong PATH")
-            self.assertEqual(0, self.crash_signal_occurrences[0][1], "Crash signal was emitted with wrong UID")
+        self.assertEqual(len(self.crash_signal_occurrences),
+                         1,
+                         "Crash signal for root's problem wasn't emitted")
+
+        self.assertEqual(0,
+                         self.crash_signal_occurrences[0][1],
+                         "Crash signal was emitted with wrong UID")
+
+        self.p2_entry_root_path = self.crash_signal_occurrences[0][0]
+        p2e_root = Problems2Entry(self.root_bus, self.p2_entry_root_path)
+        self.assertEqual(uuid, p2e_root.getproperty("uuid"))
+        self.assertEqual(duphash, p2e_root.getproperty("duphash"))
 
 
 if __name__ == "__main__":

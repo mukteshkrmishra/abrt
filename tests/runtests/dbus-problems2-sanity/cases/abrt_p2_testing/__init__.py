@@ -315,6 +315,8 @@ class TestCase(unittest.TestCase):
 
 
 def main(test_case_class):
+    #logging.getLogger().setLevel(logging.DEBUG)
+
     suite = None
     if len(sys.argv) < 3:
         suite = unittest.TestLoader().loadTestsFromTestCase(test_case_class)
@@ -377,6 +379,7 @@ def create_problem(test, p2, wait=True, description=None, bus=None):
             bus = test.bus
         p2p = wait_for_task_new_problem(test, bus, p2t)
     else:
+        p2p = (description["uuid"], description["duphash"])
         p2.NewProblem(description, 0x0)
 
     return p2p
