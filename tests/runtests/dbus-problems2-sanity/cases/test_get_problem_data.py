@@ -14,7 +14,7 @@ class TestGetProblemDataSanity(abrt_p2_testing.TestCase):
 
     def setUp(self):
         self.p2_entry_path = create_fully_initialized_problem(self, self.p2)
-        self.p2_entry_root_path = create_problem(self, self.root_p2)
+        self.p2_entry_root_path = create_problem(self, self.root_p2, bus=self.root_bus)
 
     def tearDown(self):
         if self.p2_entry_path:

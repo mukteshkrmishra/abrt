@@ -53,9 +53,10 @@ typedef enum {
 } AbrtP2TaskStatus;
 
 typedef enum {
-    ABRT_P2_TASK_CODE_ERROR,
+    ABRT_P2_TASK_CODE_ERROR = -1,
     ABRT_P2_TASK_CODE_STOP,
     ABRT_P2_TASK_CODE_DONE,
+    ABRT_P2_TASK_CODE_CANCELLED,
 } AbrtP2TaskCode;
 
 struct _AbrtP2TaskClass
@@ -96,6 +97,8 @@ struct _AbrtP2Task
 AbrtP2TaskStatus abrt_p2_task_status(AbrtP2Task *task);
 
 GVariant *abrt_p2_task_details(AbrtP2Task *task);
+
+bool abrt_p2_task_is_cancelled(AbrtP2Task *start);
 
 void abrt_p2_task_add_detail(AbrtP2Task *task, const char *key, GVariant *value);
 

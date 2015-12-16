@@ -48,6 +48,22 @@ static void abrt_p2_task_new_problem_finalize(GObject *gobject)
         g_object_unref(pv->p2tnp_fd_list);
 }
 
+static void abrt_p2_task_remove_temporary_entry(AbrtP2TaskNewProblem *task, GError **error)
+{
+    if (task->pv->p2tnp_obj == NULL)
+        return;
+
+    AbrtP2Entry *entry = abrt_p2_object_get_node(task->pv->p2tnp_obj);
+    abrt_p2_entry_delete(entry, /* allow us to delete the temporary dir */0, error);
+    abrt_p2_object_destroy(task->pv->p2tnp_obj);
+    task->pv->p2tnp_obj = NULL;
+}
+
+static void abrt_p2_task_new_problem_cancel(AbrtP2Task *task, GError **error)
+{
+    abrt_p2_task_remove_temporary_entry(ABRT_P2_TASK_NEW_PROBLEM(task), error);
+}
+
 static void abrt_p2_task_new_problem_class_init(AbrtP2TaskNewProblemClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -55,6 +71,7 @@ static void abrt_p2_task_new_problem_class_init(AbrtP2TaskNewProblemClass *klass
 
     AbrtP2TaskClass *task_class = ABRT_P2_TASK_CLASS(klass);
     task_class->run = abrt_p2_task_new_problem_run;
+    task_class->cancel = abrt_p2_task_new_problem_cancel;
 }
 
 static void abrt_p2_task_new_problem_init(AbrtP2TaskNewProblem *self)
@@ -236,6 +253,9 @@ static AbrtP2TaskCode abrt_p2_task_new_problem_run(AbrtP2Task *task, GError **er
         abrt_p2_task_add_detail(task, "NewProblem.TemporaryEntry", detail_path);
 
         np->pv->p2tnp_obj = obj;
+
+        if (abrt_p2_task_is_cancelled(task))
+            return ABRT_P2_TASK_CODE_CANCELLED;
 
         if (np->pv->p2tnp_wait_before_notify)
         {

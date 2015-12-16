@@ -56,7 +56,7 @@ class TestConcurency(abrt_p2_testing.TestCase):
         for path, bus in task_paths:
             tasks.append(Problems2Task(bus, path))
 
-        for i in range(0, 10):
+        for i in range(0, 60):
             for t in tasks:
                 status = t.getproperty('status')
                 if status == 4:
@@ -66,10 +66,15 @@ class TestConcurency(abrt_p2_testing.TestCase):
                                              "Failed to create new problem "
                                              "directory: Problem data is "
                                              "too big")
+                    tasks.remove(t)
                 elif not status == 1:
                     self.fail("Unexpected task status: %s" % (str(status)))
 
+            if not tasks:
+                break
             time.sleep(1)
+
+        self.assertFalse(tasks)
 
         for _, _, _, huge_file in buses:
             huge_file.close()

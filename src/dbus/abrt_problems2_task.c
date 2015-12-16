@@ -50,6 +50,26 @@ static void abrt_p2_task_class_init(AbrtP2TaskClass *klass)
                              G_TYPE_INT);
 }
 
+#define ABRT_P2_TASK_ABSTRACT_FUNCTION_CALL(method, task, ...) \
+    do { if (ABRT_P2_TASK_GET_CLASS(task)->method == NULL) { \
+            error_msg(); \
+            abort("Undefined Task abstract function "#method); \
+         }\
+         ABRT_P2_TASK_GET_CLASS(task)->method(task, __VA_ARGS__); } while(0)
+
+#define ABRT_P2_TASK_VIRTUAL_FUNCTION_CALL(method, task, ...) \
+    do { if (ABRT_P2_TASK_GET_CLASS(task)->method) \
+            ABRT_P2_TASK_GET_CLASS(task)->method(task, __VA_ARGS__); } while(0)
+
+#define ABRT_P2_TASK_VIRTUAL_CANCEL(task, error) \
+    ABRT_P2_TASK_VIRTUAL_FUNCTION_CALL(cancel, task, error)
+
+#define ABRT_P2_TASK_VIRTUAL_FINISH(task, error) \
+    ABRT_P2_TASK_VIRTUAL_FUNCTION_CALL(finish, task, error)
+
+#define ABRT_P2_TASK_VIRTUAL_START(task, options, error) \
+    ABRT_P2_TASK_VIRTUAL_FUNCTION_CALL(start, task, options, error)
+
 static void abrt_p2_task_init(AbrtP2Task *self)
 {
     self->pv = abrt_p2_task_get_instance_private(self);
@@ -96,24 +116,25 @@ void abrt_p2_task_set_response(AbrtP2Task *task, GVariant *response)
     task->pv->p2t_results = response;
 }
 
+bool abrt_p2_task_is_cancelled(AbrtP2Task *task)
+{
+    return (task->pv->p2t_cancellable
+              && g_cancellable_is_cancelled(task->pv->p2t_cancellable))
+           || task->pv->p2t_status == ABRT_P2_TASK_STATUS_CANCELED;
+}
+
 void abrt_p2_task_cancel(AbrtP2Task *task, GError **error)
 {
-    if (task->pv->p2t_status == ABRT_P2_TASK_STATUS_DONE)
-    {
+    if (abrt_p2_task_is_cancelled(task))
+        return;
+
+    if (task->pv->p2t_status == ABRT_P2_TASK_STATUS_RUNNING)
+        g_cancellable_cancel(task->pv->p2t_cancellable);
+    else if (task->pv->p2t_status == ABRT_P2_TASK_STATUS_STOPPED)
+        ABRT_P2_TASK_VIRTUAL_CANCEL(task, error);
+    else
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
-                "Cannot cancel finished task.");
-        return;
-    }
-
-    if (ABRT_P2_TASK_GET_CLASS(task)->cancel)
-        ABRT_P2_TASK_GET_CLASS(task)->cancel(task, error);
-
-    if (*error != NULL)
-        return;
-
-    g_cancellable_cancel(task->pv->p2t_cancellable);
-
-    abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_CANCELED);
+                    "Task is not in the state that allows cancelling");
 }
 
 void abrt_p2_task_finish(AbrtP2Task *task, GVariant **result, gint32 *code,
@@ -127,8 +148,7 @@ void abrt_p2_task_finish(AbrtP2Task *task, GVariant **result, gint32 *code,
         return;
     }
 
-    if (ABRT_P2_TASK_GET_CLASS(task)->finish)
-        ABRT_P2_TASK_GET_CLASS(task)->finish(task, error);
+    ABRT_P2_TASK_VIRTUAL_FINISH(task, error);
 
     if (*error != NULL)
         return;
@@ -149,31 +169,13 @@ static void abrt_p2_task_finish_gtask(GObject *source_object,
     if (!g_task_is_valid(result, task))
     {
         error_msg("BUG:%s:%s: invalid GTask", __FILE__, __func__);
-
-        GVariantDict response;
-        g_variant_dict_init(&response, NULL);
-        g_variant_dict_insert(&response, "Error.Message", "s", "Internal error");
-        abrt_p2_task_set_response(task, g_variant_dict_end(&response));
-
-        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_FAILED);
         return;
     }
 
     GError *error = NULL;
     const gint32 code = g_task_propagate_int(G_TASK(result), &error);
-    if (error != NULL)
-    {
-        log_debug("Task failed with error: %s", error->message);
 
-        GVariantDict response;
-        g_variant_dict_init(&response, NULL);
-        g_variant_dict_insert(&response, "Error.Message", "s", error->message);
-        abrt_p2_task_set_response(task, g_variant_dict_end(&response));
-        g_error_free(error);
-
-        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_FAILED);
-    }
-    else if (code == ABRT_P2_TASK_CODE_STOP)
+    if (code == ABRT_P2_TASK_CODE_STOP)
     {
         log_debug("Task stopped");
         abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_STOPPED);
@@ -184,6 +186,48 @@ static void abrt_p2_task_finish_gtask(GObject *source_object,
         task->pv->p2t_code = code - ABRT_P2_TASK_CODE_DONE;
         abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_DONE);
     }
+    else if (abrt_p2_task_is_cancelled(task))
+    {
+        if (error != NULL)
+        {
+            log_debug("Task canceled with error: %s", error->message);
+            g_error_free(error);
+            error = NULL;
+        }
+        else
+            log_debug("Task canceled");
+
+        ABRT_P2_TASK_VIRTUAL_CANCEL(task, &error);
+        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_CANCELED);
+    }
+    else
+    {
+        GVariantDict response;
+        g_variant_dict_init(&response, NULL);
+
+        if (error != NULL)
+        {
+            log_debug("Task failed with error: %s", error->message);
+            g_variant_dict_insert(&response, "Error.Message", "s", error->message);
+            g_error_free(error);
+        }
+        else if (code == ABRT_P2_TASK_CODE_ERROR)
+        {
+            log_debug("Task failed without error message");
+            g_variant_dict_insert(&response, "Error.Message", "s", "Task failed");
+        }
+        else
+        {
+            error_msg("BUG:%s:%s: unknown Task return code: %d", __FILE__, __func__, code);
+            g_variant_dict_insert(&response, "Error.Message", "s", "Internal error: Invalid Task return code");
+        }
+
+        abrt_p2_task_set_response(task, g_variant_dict_end(&response));
+        abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_FAILED);
+    }
+
+    g_object_unref(task->pv->p2t_cancellable);
+    task->pv->p2t_cancellable = NULL;
 }
 
 static void abrt_p2_task_thread(GTask *task,
@@ -211,12 +255,12 @@ void abrt_p2_task_start(AbrtP2Task *task, GVariant *options, GError **error)
         return;
     }
 
-    if (ABRT_P2_TASK_GET_CLASS(task)->start)
-        ABRT_P2_TASK_GET_CLASS(task)->start(task, options, error);
+    ABRT_P2_TASK_VIRTUAL_START(task, options, error);
 
     if (*error != NULL)
         return;
 
+    task->pv->p2t_cancellable = g_cancellable_new();
     GTask *gtask = g_task_new(task, task->pv->p2t_cancellable,
                     abrt_p2_task_finish_gtask, NULL);
 

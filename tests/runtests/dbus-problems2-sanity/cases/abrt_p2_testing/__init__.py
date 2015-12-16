@@ -141,6 +141,15 @@ def start_polkit_agent(bus, subject_bus_name):
 
 
 class Problems2Exception(Exception):
+    """Base exception for Problems2 test
+    """
+
+    pass
+
+
+class Problems2ExceptionTaskFailed(Problems2Exception):
+    """Exception raised when New Problem tasks fails
+    """
 
     pass
 
@@ -262,7 +271,7 @@ class TestCase(unittest.TestCase):
         self.loop.run()
 
     def _kill_loop(self):
-        print("Loop interrupted on timeout")
+        print("Loop interrupted on timeout: %s" %(str(self.signals)))
         self.interrupt_waiting(emergency=True)
         return False
 
@@ -315,8 +324,6 @@ class TestCase(unittest.TestCase):
 
 
 def main(test_case_class):
-    #logging.getLogger().setLevel(logging.DEBUG)
-
     suite = None
     if len(sys.argv) < 3:
         suite = unittest.TestLoader().loadTestsFromTestCase(test_case_class)
@@ -349,7 +356,7 @@ def wait_for_task_new_problem(test, bus, task_path):
 
     results, code = task.Finish()
     if "Error.Message" in results:
-        raise Problems2Exception(results["Error.Message"])
+        raise Problems2ExceptionTaskFailed(results["Error.Message"])
 
     return results["NewProblem.Entry"]
 
@@ -385,9 +392,14 @@ def create_problem(test, p2, wait=True, description=None, bus=None):
     return p2p
 
 
-def create_fully_initialized_problem(test, p2, wait=True, unique=False):
+def create_fully_initialized_problem(test, p2,
+                                     wait=True, unique=False, bus=None):
     with create_fully_initialized_details(unique) as description:
-            return create_problem(test, p2, wait, description)
+            return create_problem(test,
+                                  p2,
+                                  wait=wait,
+                                  description=description,
+                                  bus=bus)
 
 
 @contextmanager
@@ -464,10 +476,14 @@ def get_authorized_session(test, bus=None, session_path=None):
         session_path = test.p2.GetSession()
 
     p2_session = Problems2Session(bus, session_path)
+    p2_session.getobject().connect_to_signal("AuthorizationChanged",
+                                             test.handle_authorization_changed)
 
     with start_polkit_agent(test.root_bus, bus.get_unique_name()) as pk_agent:
         pk_agent.set_replies([True])
         p2_session.Authorize(dict())
+        # Two signals -> Accepted, Granted
+        test.loop_counter += 1
         test.wait_for_signals(["AuthorizationChanged"])
 
     return p2_session

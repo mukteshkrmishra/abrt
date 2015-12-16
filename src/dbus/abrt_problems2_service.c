@@ -356,7 +356,6 @@ static void session_object_dbus_method_call(GDBusConnection *connection,
 
         g_dbus_method_invocation_return_value(invocation, NULL);
 
-        abrt_p2_object_destroy(user_data);
         return;
     }
 
@@ -397,6 +396,7 @@ static GVariant *session_object_dbus_get_property(GDBusConnection *connection,
     return g_variant_new_boolean(abrt_p2_session_is_authorized(node));
 }
 
+
 static void session_object_destructor(AbrtP2Object *obj)
 {
     AbrtP2Session *session = (AbrtP2Session *)obj->node;
@@ -410,6 +410,9 @@ static void session_object_destructor(AbrtP2Object *obj)
         error_msg("BUG: destructing session object for user who does not have session opened");
         abort();
     }
+
+    abrt_p2_session_clean_tasks(session);
+    abrt_p2_session_close(session);
 
     user->sessions = g_list_remove(user->sessions, session);
     g_object_unref(session);
@@ -1371,10 +1374,44 @@ GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
 /*
  * /org/freedesktop/Problems2/Task
  */
-static void task_object_destructor(AbrtP2Object *obj)
+static void task_object_on_status_changed(AbrtP2Task *task, gint32 status,
+            gpointer user_data);
+
+static void task_object_on_canceled_task(AbrtP2Task *task, gint32 status,
+            gpointer user_data);
+
+static void task_object_dispose(AbrtP2Object *obj)
 {
-    AbrtP2Task *task = (AbrtP2Task *)obj->node;
-    g_object_unref(task);
+    AbrtP2Task *task = abrt_p2_object_get_node(obj);
+
+    gulong sig_handler = g_signal_handler_find(task,
+                                               G_SIGNAL_MATCH_FUNC,
+                                               0,
+                                               0,
+                                               NULL,
+                                               task_object_on_status_changed,
+                                               NULL);
+
+    if (sig_handler != 0)
+        g_signal_handler_disconnect(task, sig_handler);
+
+    sig_handler = g_signal_handler_find(task,
+                                        G_SIGNAL_MATCH_FUNC,
+                                        0,
+                                        0,
+                                        NULL,
+                                        task_object_on_canceled_task,
+                                        NULL);
+
+    if (sig_handler != 0)
+        g_signal_handler_disconnect(task, sig_handler);
+
+    abrt_p2_object_destroy(obj);
+}
+
+static void task_object_on_canceled_task(AbrtP2Task *task, gint32 status, gpointer user_data)
+{
+    task_object_dispose(user_data);
 }
 
 static void task_object_on_status_changed(AbrtP2Task *task, gint32 status, gpointer user_data)
@@ -1390,13 +1427,9 @@ static void task_object_on_status_changed(AbrtP2Task *task, gint32 status, gpoin
     g_variant_dict_init(&properties_changed, NULL);
     g_variant_dict_insert(&properties_changed, "status", "v", g_variant_new_int32(status));
 
-    //GVariantBuilder properties_invalidated;
-    //g_variant_builder_init(&properties_invalidated, G_VARIANT_TYPE("as"));
-
     GVariant *children[3];
     children[0] = g_variant_new_string(object->p2o_type->iface->name);
     children[1] = g_variant_dict_end(&properties_changed);
-    //children[2] = g_variant_builder_end(&properties_invalidated);
     children[2] = g_variant_new("as", NULL);
 
     GVariant *parameters = g_variant_new_tuple(children, 3);
@@ -1434,7 +1467,7 @@ static AbrtP2Object *task_object_register(AbrtP2Service* service, AbrtP2Object *
                                   &(service->pv->p2srv_p2_task_type),
                                   path,
                                   task,
-                                  task_object_destructor,
+                                  NULL,
                                   error);
 
     if (obj == NULL)
@@ -1505,8 +1538,15 @@ static void task_object_dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("Cancel", method_name) == 0)
     {
-        /* TODO: How to destroy the task? */
+        int s = g_signal_connect(task,
+                                 "status-changed",
+                                 G_CALLBACK(task_object_on_canceled_task),
+                                 user_data);
+
         abrt_p2_task_cancel(task, &error);
+
+        if (error != NULL)
+            g_signal_handler_disconnect(task, s);
     }
     else if (strcmp("Finish", method_name) == 0)
     {
@@ -1521,17 +1561,17 @@ static void task_object_dbus_method_call(GDBusConnection *connection,
             children[1] = g_variant_new_int32(code);
 
             response = g_variant_new_tuple(children, 2);
-        }
 
-        GError *local_error = NULL;
-        abrt_p2_session_remove_task(session, task, &local_error);
-        if (local_error != NULL)
-        {
-            error_msg("BUG: failed to remove task from session: %s", local_error->message);
-            g_error_free(local_error);
-        }
+            GError *local_error = NULL;
+            abrt_p2_session_remove_task(session, task, &local_error);
+            if (local_error != NULL)
+            {
+                error_msg("BUG: failed to remove task from session: %s", local_error->message);
+                g_error_free(local_error);
+            }
 
-        g_object_unref(task);
+            task_object_dispose(user_data);
+        }
     }
     else
     {
@@ -2026,19 +2066,38 @@ static void on_g_signal(GDBusProxy *proxy,
     GHashTableIter iter;
     g_hash_table_iter_init(&iter, service->pv->p2srv_p2_session_type.objects);
 
-    const char *p;
-    AbrtP2Object *obj;
-    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
+    const char *session_path;
+    AbrtP2Object *session_obj;
+    while(g_hash_table_iter_next(&iter, (gpointer)&session_path, (gpointer)&session_obj))
     {
-        AbrtP2Session *session = obj->node;
-        if (strcmp(bus_name, abrt_p2_session_caller(session)) != 0)
+        AbrtP2Session *session = abrt_p2_object_get_node(session_obj);
+        const char *session_caller = abrt_p2_session_caller(session);
+        if (strcmp(bus_name, session_caller) != 0)
             continue;
 
-        log_debug("Caller '%s' disconnected without closing session: %s", bus_name, p);
+        log_debug("Bus '%s' disconnected: destroying session: %s", bus_name, session_path);
 
-        /* TODO: destroy tasks before closing */
-        abrt_p2_session_close(session);
-        abrt_p2_object_destroy(obj);
+        GHashTableIter task_iter;
+        g_hash_table_iter_init(&task_iter, service->pv->p2srv_p2_task_type.objects);
+
+        const char *task_path;
+        AbrtP2Object *task_obj;
+        const size_t session_path_len = strlen(session_path);
+        while(g_hash_table_iter_next(&task_iter, (gpointer)&task_path, (gpointer)&task_obj))
+        {
+            if (strncmp(task_path, session_path, session_path_len) != 0)
+                continue;
+
+            if (strncmp(task_path + session_path_len, "/Task/", strlen("/Task/")) != 0)
+                continue;
+
+            log_debug("Destroying Task of disconnected session: %s", task_path);
+
+            abrt_p2_object_destroy(task_obj);
+        }
+
+        /* session_path belongs to session_obj */
+        abrt_p2_object_destroy(session_obj);
     }
 }
 

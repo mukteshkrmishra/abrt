@@ -374,3 +374,94 @@ int abrt_p2_session_tasks_count(AbrtP2Session *session)
     return g_list_length(session->pv->p2s_tasks);
 }
 
+static void abrt_p2_session_dispose_task(AbrtP2Task *task, gint32 status)
+{
+    switch(status)
+    {
+        case ABRT_P2_TASK_STATUS_STOPPED:
+            {
+                GError *local_error = NULL;
+                abrt_p2_task_cancel(task, &local_error);
+                if (local_error != NULL)
+                {
+                    error_msg("Task garbage collector failed to cancel task: %s", local_error->message);
+                    g_error_free(local_error);
+                }
+
+                /* In case of errors, this could cause problems, but I
+                 * don't have better plan yet. */
+                log_debug("Disposed new/stopped task: %p", task);
+                g_object_unref(task);
+            }
+            break;
+
+        case ABRT_P2_TASK_STATUS_NEW:
+            log_debug("Disposed new task: %p", task);
+            g_object_unref(task);
+            break;
+
+        case ABRT_P2_TASK_STATUS_FAILED:
+            log_debug("Disposed failed task: %p", task);
+            g_object_unref(task);
+            break;
+
+        case ABRT_P2_TASK_STATUS_CANCELED:
+            log_debug("Disposed canceled task: %p", task);
+            g_object_unref(task);
+            break;
+
+        case ABRT_P2_TASK_STATUS_DONE:
+            log_debug("Disposed done task: %p", task);
+            g_object_unref(task);
+            break;
+
+        case ABRT_P2_TASK_STATUS_RUNNING:
+            error_msg("BUG: cannot dispose RUNNING task");
+            abort();
+            break;
+    }
+}
+
+static void abrt_p2_session_delayed_dispose_task(AbrtP2Task *task, gint32 status, gpointer user_data)
+{
+    if (status == ABRT_P2_TASK_STATUS_RUNNING)
+    {
+        error_msg("BUG: task to dispose must not change state to RUNNING");
+        abort();
+    }
+
+    log_debug("Going to dispose delayed task: %p: %d", task, status);
+    abrt_p2_session_dispose_task(task, status);
+}
+
+void abrt_p2_session_clean_tasks(AbrtP2Session *session)
+{
+    GList *session_tasks = session->pv->p2s_tasks;
+    for (GList *task = session_tasks; task != NULL; task = g_list_next(task))
+    {
+        AbrtP2Task *t = ABRT_P2_TASK(task->data);
+        const AbrtP2TaskStatus status = abrt_p2_task_status(t);
+
+        if (status != ABRT_P2_TASK_STATUS_RUNNING)
+        {
+            abrt_p2_session_dispose_task(t, status);
+            continue;
+        }
+
+        GError *local_error = NULL;
+        log_debug("Delaying disposal of running task: %p", t);
+        g_signal_connect(t, "status-changed", G_CALLBACK(abrt_p2_session_delayed_dispose_task), NULL);
+        abrt_p2_task_cancel(t, &local_error);
+
+        if (local_error != NULL)
+        {
+            error_msg("Task garbage collector failed to cancel running task: %s", local_error->message);
+            g_error_free(local_error);
+        }
+
+        /* No free even in case of errors. It could probably
+         * produce zombie tasks but I don't have better plan yet. */
+    }
+
+    session->pv->p2s_tasks = NULL;
+}

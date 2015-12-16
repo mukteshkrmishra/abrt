@@ -50,6 +50,8 @@ int abrt_p2_session_owns_task(AbrtP2Session *session, AbrtP2Task *task);
 GList *abrt_p2_session_tasks(AbrtP2Session *session);
 int abrt_p2_session_tasks_count(AbrtP2Session *session);
 
+void abrt_p2_session_clean_tasks(AbrtP2Session *session);
+
 /*
  * Class methods
  */
