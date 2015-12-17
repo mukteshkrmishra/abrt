@@ -42,6 +42,7 @@ TEST_USER="abrt-dbus-test"
 rlJournalStart
     rlPhaseStartSetup
         check_prior_crashes
+        load_abrt_conf
 
         TmpDir=$(mktemp -d)
         cp -r ./cases $TmpDir
@@ -61,13 +62,31 @@ rlJournalStart
     rlPhaseStartTest
         for test_fixture in `ls cases/test_*.py`
         do
-            rlLog "`which abrt-dbus`"
+            # [  LOG   ] ++++ Starting: cases/test_foo.py ++++
+            # [  PASS  ] Command 'python3 cases/test_foo.py 12345' ..
+            # [  FAIL  ] Failed to kill 54321
+            # [  FAIL  ] The dump location is tainted
+            # [  LOG   ] ++++ Finished: cases/test_foo.py ++++
+            #
+            rlLog "++++ Starting: $test_fixture ++++"
+
+            which abrt-dbus
             abrt-dbus -vvv -t 100 &> abrt_dbus_${test_fixture#cases/}.log &
             ABRT_DBUS_PID=$!
+            ps aux | grep abrt-dbus
 
             rlRun "python3 $test_fixture $TEST_USER_UID"
 
-            kill $ABRT_DBUS_PID
+            sleep 2
+            kill $ABRT_DBUS_PID || rlLog "Failed to kill $ABRT_DBUS_PID"
+
+            DIRECTORIES=`find $ABRT_CONF_DUMP_LOCATION -mindepth 1 -maxdepth 1 -type d`
+            if [ -n "$DIRECTORIES" ]; then
+                rlFail "The dump location is tainted"
+                ls -al $ABRT_CONF_DUMP_LOCATION
+            fi
+
+            rlLog "++++ Finished: $test_fixture ++++"
         done
     rlPhaseEnd
 

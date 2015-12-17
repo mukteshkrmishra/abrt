@@ -5,7 +5,8 @@ import dbus
 import time
 
 import abrt_p2_testing
-from abrt_p2_testing import (BUS_NAME, Problems2Task, get_huge_file_path)
+from abrt_p2_testing import (BUS_NAME, Problems2Task, get_huge_file_path,
+                             wait_for_task_status)
 
 
 class TestTaskNewProblem(abrt_p2_testing.TestCase):
@@ -15,17 +16,6 @@ class TestTaskNewProblem(abrt_p2_testing.TestCase):
 
     def tearDown(self):
         pass
-
-    def wait_for_task_stastus(self, bus, task_path, status):
-        def on_properties_changed(iface, changed, invalidated):
-            if changed["status"] == status:
-                self.interrupt_waiting()
-
-        task = Problems2Task(bus, task_path)
-        task.getobjectproperties().connect_to_signal("PropertiesChanged",
-                                                     on_properties_changed)
-        self.wait_for_signals(["ProperiesChanged"])
-        self.assertEquals(task.getproperty("status"), status)
 
     def test_task_new_task_destroyed_with_session(self):
         pbus = dbus.SystemBus(private=True)
@@ -50,9 +40,9 @@ class TestTaskNewProblem(abrt_p2_testing.TestCase):
 
         task = Problems2Task(self.bus, task_path)
         self.assertRaisesDBusError(
-        "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
-        "'org.freedesktop.DBus.Properties' on object at path " + task_path,
-        task.getproperty, "status")
+            "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
+            "'org.freedesktop.DBus.Properties' on object at path " + task_path,
+            task.getproperty, "status")
 
     def test_task_stopped_task_destroyed_with_session(self):
         pbus = dbus.SystemBus(private=True)
@@ -73,18 +63,18 @@ class TestTaskNewProblem(abrt_p2_testing.TestCase):
         task_path = p2.NewProblem(description, 0x1 | 0x2 | 0x4)
 
         self.bus.get_object(BUS_NAME, task_path)
-        self.wait_for_task_stastus(pbus, task_path, 2)
+        wait_for_task_status(self, pbus, task_path, 2)
 
         pbus.close()
 
         task = Problems2Task(self.bus, task_path)
         self.assertRaisesDBusError(
-        "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
-        "'org.freedesktop.DBus.Properties' on object at path " + task_path,
-        task.getproperty, "status")
+            "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
+            "'org.freedesktop.DBus.Properties' on object at path " + task_path,
+            task.getproperty, "status")
 
     def test_task_done_task_destroyed_with_session(self):
-        old_problems = set(self.p2.GetProblems(0))
+        old_problems = set(self.p2.GetProblems(0, dict()))
 
         pbus = dbus.SystemBus(private=True)
         p2_proxy = pbus.get_object(BUS_NAME,
@@ -104,17 +94,17 @@ class TestTaskNewProblem(abrt_p2_testing.TestCase):
         task_path = p2.NewProblem(description, 0x1 | 0x4)
 
         self.bus.get_object(BUS_NAME, task_path)
-        self.wait_for_task_stastus(pbus, task_path, 5)
+        wait_for_task_status(self, pbus, task_path, 5)
 
         pbus.close()
 
         task = Problems2Task(self.bus, task_path)
         self.assertRaisesDBusError(
-        "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
-        "'org.freedesktop.DBus.Properties' on object at path " + task_path,
-        task.getproperty, "status")
+            "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
+            "'org.freedesktop.DBus.Properties' on object at path " + task_path,
+            task.getproperty, "status")
 
-        new_problems = self.p2.GetProblems(0)
+        new_problems = self.p2.GetProblems(0, dict())
         to_delete = list()
         for p in new_problems:
             if p in old_problems:
@@ -149,12 +139,39 @@ class TestTaskNewProblem(abrt_p2_testing.TestCase):
 
         task = Problems2Task(self.bus, task_path)
         self.assertRaisesDBusError(
-        "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
-        "'org.freedesktop.DBus.Properties' on object at path " + task_path,
-        task.getproperty, "status")
+            "org.freedesktop.DBus.Error.UnknownMethod: No such interface "
+            "'org.freedesktop.DBus.Properties' on object at path " + task_path,
+            task.getproperty, "status")
 
         # let abrt-dbus finish its work load
         time.sleep(2)
+
+    def test_accessible_to_own_session_only(self):
+        description = {"analyzer": "problems2testsuite_analyzer",
+                       "reason": "Application has been killed",
+                       "backtrace": "die()",
+                       "duphash": "TASK_NEW_PROBLEM_SESSION",
+                       "uuid": "TASK_NEW_PROBLEM_SESSION",
+                       "executable": "/usr/bin/foo",
+                       "type": "abrt-problems2"}
+
+        # Create task, run it and stop after temporary entry is created
+        root_task_path = self.root_p2.NewProblem(description, 0x1 | 0x2 | 0x4)
+        root_task = wait_for_task_status(self,
+                                         self.root_bus,
+                                         root_task_path,
+                                         2)
+
+        task = Problems2Task(self.bus, root_task_path)
+        self.assertRaisesDBusError(
+            "org.freedesktop.DBus.Error.AccessDenied: "
+            "The task does not belong to your session",
+            task.getproperty, "status")
+
+        root_task.Cancel(0)
+
+        # let abrt-dbus finish its work load
+        time.sleep(1)
 
 
 if __name__ == "__main__":

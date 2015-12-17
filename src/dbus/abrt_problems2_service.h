@@ -64,8 +64,6 @@ int abrt_p2_service_remove_problem(AbrtP2Service *service,
 GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
             const char *entry_path, uid_t caller_uid, GError **error);
 
-GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid);
-
 AbrtP2Object *abrt_p2_service_get_entry_object(AbrtP2Service *service,
             const char *entry_path, GError **error);
 
@@ -98,8 +96,18 @@ GVariant *abrt_p2_service_new_problem_finish(AbrtP2Service *service,
 GVariant *abrt_p2_service_callers_session(AbrtP2Service *service,
             const char *caller, GError **error);
 
+/*
+ * GetProblems
+ */
+typedef enum
+{
+    ABRT_P2_SERVICE_GET_PROBLEM_FLAGS_NONE = 0x0,
+    ABRT_P2_SERVICE_GET_PROBLEM_FLAGS_FOREIGN = 0x1,
+    ABRT_P2_SERVICE_GET_PROBLEM_FLAGS_NEW = 0x2,
+} AbrtP2ServiceGetProblemsFlags;
+
 GVariant *abrt_p2_service_get_problems(AbrtP2Service *service, uid_t caller_uid,
-            gint32 flags, GError **error);
+            gint32 flags, GVariant *options, GError **error);
 
 GVariant *abrt_p2_service_delete_problems(AbrtP2Service *service,
             GVariant *entries, uid_t caller_uid, GError **error);

@@ -28,7 +28,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
         task_three_path = self.p2.NewProblem(description, 0x1)
         three = wait_for_task_new_problem(self, self.bus, task_three_path)
 
-        p = self.p2.GetProblems(0)
+        p = self.p2.GetProblems(0, dict())
 
         self.assertIn(one, p)
         self.assertIn(two, p)
@@ -36,7 +36,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
 
         self.p2.DeleteProblems([one])
 
-        p = self.p2.GetProblems(0)
+        p = self.p2.GetProblems(0, dict())
 
         self.assertNotIn(one, p)
         self.assertIn(two, p)
@@ -46,7 +46,7 @@ class TestDeleteProblemsSanity(abrt_p2_testing.TestCase):
                                    self.p2.DeleteProblems,
                                    [two, three, one])
 
-        p = self.p2.GetProblems(0)
+        p = self.p2.GetProblems(0, dict())
 
         self.assertNotIn(one, p)
         self.assertNotIn(two, p)

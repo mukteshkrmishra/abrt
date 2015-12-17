@@ -340,6 +340,20 @@ def wait_for_hooks(test):
     time.sleep(1)
 
 
+def wait_for_task_status(test, bus, task_path, status):
+    def on_properties_changed(iface, changed, invalidated):
+        if changed["status"] == status:
+            test.interrupt_waiting()
+
+    task = Problems2Task(bus, task_path)
+    task.getobjectproperties().connect_to_signal("PropertiesChanged",
+                                                 on_properties_changed)
+    test.wait_for_signals(["ProperiesChanged"])
+    test.assertEquals(task.getproperty("status"), status)
+
+    return task
+
+
 def wait_for_task_new_problem(test, bus, task_path):
     def on_properties_changed(iface, changed, invalidated):
         if changed["status"] == 1:

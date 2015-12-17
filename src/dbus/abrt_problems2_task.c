@@ -131,7 +131,11 @@ void abrt_p2_task_cancel(AbrtP2Task *task, GError **error)
     if (task->pv->p2t_status == ABRT_P2_TASK_STATUS_RUNNING)
         g_cancellable_cancel(task->pv->p2t_cancellable);
     else if (task->pv->p2t_status == ABRT_P2_TASK_STATUS_STOPPED)
+    {
         ABRT_P2_TASK_VIRTUAL_CANCEL(task, error);
+        if (*error == NULL)
+            abrt_p2_task_change_status(task, ABRT_P2_TASK_STATUS_CANCELED);
+    }
     else
         g_set_error(error, G_DBUS_ERROR, G_DBUS_ERROR_FAILED,
                     "Task is not in the state that allows cancelling");

@@ -31,7 +31,7 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
         self.root_p2.DeleteProblems([self.p2_entry_root_path])
 
     def test_get_problems(self):
-        p = self.p2.GetProblems(0)
+        p = self.p2.GetProblems(0, dict())
 
         self.assertNotEqual(0, len(p), "no problems")
         self.assertIn(self.p2_entry_path, p, "missing our problem")
@@ -39,9 +39,16 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
                          p,
                          "accessible private problem")
 
+    def test_get_foreign_problems(self):
+        p = self.p2.GetProblems(0x1, dict())
+
+        self.assertNotEqual(0, len(p), "no problems")
+        self.assertNotIn(self.p2_entry_path, p)
+        self.assertIn(self.p2_entry_root_path, p)
+
     def test_get_foreign_problem(self):
         with authorize_session(self):
-            p = self.p2.GetProblems(0)
+            p = self.p2.GetProblems(0, dict())
 
             self.assertNotEqual(0, len(p), "no problems")
             self.assertIn(self.p2_entry_path, p, "missing our problem")
@@ -59,7 +66,7 @@ class TestForeignProblems(abrt_p2_testing.TestCase):
                              "Properties are accessible")
 
     def test_foreign_problem_not_accessible(self):
-        p = self.p2.GetProblems(0)
+        p = self.p2.GetProblems(0, dict())
 
         self.assertNotEqual(0, len(p), "no problems")
         self.assertIn(self.p2_entry_path, p, "missing our problem")

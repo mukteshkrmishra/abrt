@@ -1353,24 +1353,6 @@ GVariant *abrt_p2_service_entry_problem_data(AbrtP2Service *service,
     return abrt_p2_entry_problem_data(ABRT_P2_ENTRY(obj->node), caller_uid, error);
 }
 
-GList *abrt_p2_service_get_problems_nodes(AbrtP2Service *service, uid_t uid)
-{
-    GList *paths = NULL;
-
-    GHashTableIter iter;
-    g_hash_table_iter_init(&iter, service->pv->p2srv_p2_entry_type.objects);
-
-    const char *p;
-    AbrtP2Object *obj;
-    while(g_hash_table_iter_next(&iter, (gpointer)&p, (gpointer)&obj))
-    {
-        if (0 == abrt_p2_entry_accessible_by_uid(ABRT_P2_ENTRY(obj->node), uid, NULL))
-            paths = g_list_prepend(paths, (gpointer)p);
-    }
-
-    return paths;
-}
-
 /*
  * /org/freedesktop/Problems2/Task
  */
@@ -1411,6 +1393,10 @@ static void task_object_dispose(AbrtP2Object *obj)
 
 static void task_object_on_canceled_task(AbrtP2Task *task, gint32 status, gpointer user_data)
 {
+    if (status != ABRT_P2_TASK_STATUS_CANCELED)
+        log_warning("Canceled task moved to another state than CANCELLED");
+
+    log_debug("Disposing canceled task");
     task_object_dispose(user_data);
 }
 
@@ -1709,17 +1695,55 @@ GVariant *abrt_p2_service_callers_session(AbrtP2Service *service, const char *ca
 }
 
 GVariant *abrt_p2_service_get_problems(AbrtP2Service *service, uid_t caller_uid,
-            gint32 flags, GError **error)
+            gint32 flags, GVariant *options, GError **error)
 {
     GVariantBuilder builder;
     g_variant_builder_init(&builder, G_VARIANT_TYPE("ao"));
 
-    GList *problem_nodes = abrt_p2_service_get_problems_nodes(service, caller_uid);
-    for (GList *p = problem_nodes; p != NULL; p = g_list_next(p))
-        g_variant_builder_add(&builder, "o", (char*)p->data);
-    g_list_free(problem_nodes);
+    GHashTableIter iter;
+    g_hash_table_iter_init(&iter, service->pv->p2srv_p2_entry_type.objects);
 
-    return g_variant_new("(ao)", &builder);
+    const char *entry_path;
+    AbrtP2Object *entry_obj;
+    while(g_hash_table_iter_next(&iter, (gpointer)&entry_path, (gpointer)&entry_obj))
+    {
+        bool singleout = flags == 0;
+
+        AbrtP2Entry *entry = abrt_p2_object_get_node(entry_obj);
+        int state = abrt_p2_entry_state(entry);
+
+        if (state == ABRT_P2_ENTRY_STATE_DELETED)
+        {
+            continue;
+        }
+        else if (state == ABRT_P2_ENTRY_STATE_NEW)
+        {
+            if (flags == 0)
+                continue;
+
+            singleout = singleout || (flags & ABRT_P2_SERVICE_GET_PROBLEM_FLAGS_NEW);
+        }
+
+        if (0 != abrt_p2_entry_accessible_by_uid(entry, caller_uid, NULL))
+        {
+            if (flags == 0)
+                continue;
+
+            log_debug("Entry not accessible: %s", entry_path);
+            singleout = singleout || (flags & ABRT_P2_SERVICE_GET_PROBLEM_FLAGS_FOREIGN);
+        }
+
+        if (singleout)
+        {
+            log_debug("Adding entry: %s", entry_path);
+            g_variant_builder_add(&builder, "o", entry_path);
+        }
+    }
+
+
+    GVariant *retval_body[1];
+    retval_body[0] = g_variant_builder_end(&builder);
+    return  g_variant_new_tuple(retval_body, ARRAY_SIZE(retval_body));
 }
 
 
@@ -1796,7 +1820,17 @@ static void p2_object_dbus_method_call(GDBusConnection *connection,
     }
     else if (strcmp("GetProblems", method_name) == 0)
     {
-        response = abrt_p2_service_get_problems(service, caller_uid, 0, &error);
+        GVariant *flags_param = g_variant_get_child_value(parameters, 0);
+        GVariant *options_param = g_variant_get_child_value(parameters, 1);
+
+        response = abrt_p2_service_get_problems(service,
+                                                caller_uid,
+                                                g_variant_get_int32(flags_param),
+                                                options_param,
+                                                &error);
+
+        g_variant_unref(options_param);
+        g_variant_unref(flags_param);
     }
     else if (strcmp("GetProblemData", method_name) == 0)
     {
@@ -2093,7 +2127,7 @@ static void on_g_signal(GDBusProxy *proxy,
 
             log_debug("Destroying Task of disconnected session: %s", task_path);
 
-            abrt_p2_object_destroy(task_obj);
+            task_object_dispose(task_obj);
         }
 
         /* session_path belongs to session_obj */
